@@ -4,7 +4,7 @@
 # AUTOR: System Wojtek/CEO
 # DATA: 2024-12-24
 # MODEL: 2-plikowy (Gotowy do EDITOR.md)
-# WERSJA: 1.5 FINAL (Basic Auth tylko dla frontendu, bez /api/)
+# WERSJA: 1.6 FINAL (usuwa auth_basic TYLKO z /api/)
 # ============================================================================
 # ZASADY:
 # 1. Używa STAŁYCH poświadczeń: Agnostyk / Castorama13.
@@ -94,7 +94,7 @@ function utworz_kopie_zapasowa() {
 }
 
 function skonfiguruj_autoryzacje() {
-    echo "[3] Konfiguracja HTTP Basic Auth (TYLKO dla frontendu)..."
+    echo "[3] Konfiguracja HTTP Basic Auth (tylko frontend, bez /api/)..."
     
     # --- CZĘŚĆ A: TWORZENIE PLIKU Z HASŁAMI (.htpasswd) ---
     echo "   [3.1] Tworzenie pliku z poświadczeniami: $HTPASSWD_FILE"
@@ -110,37 +110,44 @@ function skonfiguruj_autoryzacje() {
         exit 1
     fi
     
-    # --- CZĘŚĆ B: MODYFIKACJA KONFIGURACJI NGINX ---
-    echo "   [3.2] Modyfikacja konfiguracji Nginx ($NGINX_SITE_CONFIG)..."
+    # --- CZĘŚĆ B: USUWANIE AUTH_BASIC Z /api/ (TYLKO TE DWIE LINIE) ---
+    echo "   [3.2] Usuwanie Basic Auth z 'location /api/' (backend)..."
     
-    # 1. Upewnij się, że Basic Auth jest w 'location /' (frontend)
-    if ! grep -q 'auth_basic.*location /' "$NGINX_SITE_CONFIG"; then
-        echo "   [INFO] Dodaję Basic Auth do 'location /' (frontend)..."
+    # Sprawdź, czy w ogóle istnieją linie do usunięcia
+    if grep -q 'auth_basic.*location /api/' "$NGINX_SITE_CONFIG"; then
+        echo "   [INFO] Znaleziono dyrektywy auth_basic w /api/. Usuwam..."
+        # USUŃ DWIE LINIE: tę z 'auth_basic' i następną (auth_basic_user_file)
+        # Działa tylko wewnątrz bloku 'location /api/'
+        sed -i '/location \/api\/.*{/,/}/ {
+            /auth_basic "Restricted Access";/d
+            /auth_basic_user_file.*;/d
+        }' "$NGINX_SITE_CONFIG"
+        
+        # Weryfikacja
+        if grep -q 'auth_basic.*location /api/' "$NGINX_SITE_CONFIG"; then
+            echo "   [BŁĄD] Nie udało się usunąć dyrektyw auth_basic z /api/."
+            exit 1
+        else
+            echo "   [OK] Dyrektywy auth_basic usunięte z 'location /api/'."
+        fi
+    else
+        echo "   [OK] Dyrektywy auth_basic nieobecne w 'location /api/' (już dobrze)."
+    fi
+    
+    # --- CZĘŚĆ C: UPEWNIJ SIĘ, ŻE FRONTEND (location /) JEST ZABEZPIECZONY ---
+    echo "   [3.3] Weryfikacja zabezpieczenia frontendu (location /)..."
+    if grep -q 'auth_basic.*location /' "$NGINX_SITE_CONFIG"; then
+        echo "   [OK] Frontend (location /) jest zabezpieczony Basic Auth."
+    else
+        echo "   [UWAGA] Frontend (location /) NIE ma Basic Auth. Dodaję..."
+        # Proste dodanie na końcu bloku (przed '}')
         sed -i '/location \/.*{/,/}/ {
             /}/i\
     auth_basic "Restricted Access";\
     auth_basic_user_file '"$HTPASSWD_FILE"';
         }' "$NGINX_SITE_CONFIG"
-    else
-        echo "   [OK] Basic Auth już obecny w 'location /'."
+        echo "   [OK] Dodano Basic Auth do frontendu."
     fi
-    
-    # 2. USUŃ Basic Auth z 'location /api/' (backend) - jeśli istnieje
-    if grep -q 'auth_basic.*location /api/' "$NGINX_SITE_CONFIG"; then
-        echo "   [INFO] Usuwam Basic Auth z 'location /api/' (backend)..."
-        # Usuń linie zawierające 'auth_basic' wewnątrz bloku 'location /api/'
-        sed -i '/location \/api\/.*{/,/}/ {
-            /auth_basic/d
-        }' "$NGINX_SITE_CONFIG"
-        echo "   [OK] Basic Auth usunięty z 'location /api/'."
-    else
-        echo "   [OK] Basic Auth nieobecny w 'location /api/' (tak jak trzeba)."
-    fi
-    
-    # Ostateczna weryfikacja
-    echo "   [INFO] Stan końcowy:"
-    echo "     - Frontend (location /): $(grep -q 'auth_basic.*location /' "$NGINX_SITE_CONFIG" && echo 'ZABEZPIECZONY' || echo 'NIEZABEZPIECZONY')"
-    echo "     - Backend (location /api/): $(grep -q 'auth_basic.*location /api/' "$NGINX_SITE_CONFIG" && echo 'ZABEZPIECZONY (UWAGA!)' || echo 'OTWARTY (tylko lokalnie)')"
     echo ""
 }
 
@@ -230,7 +237,7 @@ function main() {
     sprawdz_narzędzia
     # KROK 2: Utwórz kopię zapasową konfiguracji
     utworz_kopie_zapasowa
-    # KROK 3: Skonfiguruj autoryzację (tylko frontend)
+    # KROK 3: Skonfiguruj autoryzację (usuń z /api/, upewnij się o /)
     skonfiguruj_autoryzacje
     # KROK 4: Walidacja i przeładowanie
     waliduj_i_przeladuj
