@@ -4,7 +4,7 @@
 # AUTOR: System Wojtek/CEO
 # DATA: 2024-12-24
 # MODEL: 2-plikowy (Gotowy do EDITOR.md)
-# WERSJA: 1.4 FINAL (pełna implementacja walidacji, przeładowania i rollbacku)
+# WERSJA: 1.4 FINAL (pełna implementacja walidacji, przeładowania i rollbacku) - POPRAWIONA
 # ============================================================================
 # ZASADY:
 # 1. Używa STAŁYCH poświadczeń: Agnostyk / Castorama13.
@@ -246,7 +246,8 @@ function main() {
 }
 
 # --- OPCJA AWARYJNEGO WYCOFANIA (dla ręcznego uruchomienia) ---
-if [[ "$1" == "--rollback" ]]; then
+# POPRAWKA: Sprawdzamy, czy pierwszy argument istnieje, zanim go porównamy.
+if [[ $# -gt 0 ]] && [[ "$1" == "--rollback" ]]; then
     echo "RĘCZNE WYWOŁANIE PROCEDURY AWARYJNEGO WYCOFANIA..."
     procedura_awaryjna
 fi
