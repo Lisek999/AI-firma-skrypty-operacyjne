@@ -14,8 +14,14 @@ echo ""
 echo "[1/6] Instalacja wymaganych pakietów..."
 sudo apt update
 sudo apt install -y python3-pip python3-venv gunicorn nginx supervisor
-sudo pip3 install flask psutil
-echo "✅ Zależności zainstalowane."
+echo "✅ Zależności systemowe zainstalowane."
+echo ""
+echo "[1a/6] Tworzenie virtual environment Python..."
+sudo mkdir -p /opt/ai_firma_dashboard
+cd /opt/ai_firma_dashboard
+sudo python3 -m venv venv
+sudo ./venv/bin/pip install flask psutil gunicorn
+echo "✅ Virtual environment i pakiety Python gotowe."
 echo ""
 
 # 2. TWORZENIE STRUKTURY KATALOGÓW
@@ -28,7 +34,6 @@ echo ""
 
 # 3. ZAPISYWANIE PLIKÓW ŹRÓDŁOWYCH (PRZEZ GETSCRIPT)
 echo "[3/6] Pobieranie i zapisywanie plików źródłowych..."
-# Pobiera zawartość bloku SOURCE_* i zapisuje do pliku
 getscript SOURCE_dashboard_api.py > app.py
 getscript SOURCE_dashboard_frontend.html > static/index.html
 getscript SOURCE_nginx_dashboard.conf > /tmp/dashboard.nginx.conf
@@ -52,7 +57,7 @@ else
     if [ -f /etc/nginx/sites-available/dashboard.backup.* ]; then
         sudo cp /etc/nginx/sites-available/dashboard.backup.* /etc/nginx/sites-available/dashboard
     fi
-    sudo nginx -t  # Ponowna próba walidacji oryginału
+    sudo nginx -t
     exit 1
 fi
 echo ""
@@ -60,6 +65,8 @@ echo ""
 # 5. KONFIGURACJA SUPERVISORA
 echo "[5/6] Konfiguracja Supervisora..."
 sudo cp /tmp/dashboard.supervisor.conf /etc/supervisor/conf.d/dashboard-api.conf
+# POPRAWKA: użyj gunicorn z virtual environment
+sudo sed -i 's|command=/usr/bin/gunicorn|command=/opt/ai_firma_dashboard/venv/bin/gunicorn|' /etc/supervisor/conf.d/dashboard-api.conf
 sudo supervisorctl reread
 sudo supervisorctl update
 sleep 2
@@ -150,7 +157,7 @@ def get_health():
             'services': {
                 'nginx': get_service_status('nginx'),
                 'supervisor': get_service_status('supervisor'),
-                'dashboard_api': get_service_status('supervisor')  # Sprawdza przez nadrzędny
+                'dashboard_api': get_service_status('supervisor')
             }
         }
         return jsonify(data)
@@ -163,7 +170,6 @@ def serve_index():
     return send_from_directory('static', 'index.html')
 
 if __name__ == '__main__':
-    # Tylko do debugowania lokalnego
     app.run(host='127.0.0.1', port=5000, debug=False)
 ```
 
@@ -237,7 +243,7 @@ if __name__ == '__main__':
             `;
         }
         loadData();
-        setInterval(loadData, 10000); // Odśwież co 10s
+        setInterval(loadData, 10000);
     </script>
 </body>
 </html>
@@ -248,11 +254,10 @@ if __name__ == '__main__':
 # /etc/nginx/sites-available/dashboard
 server {
     listen 80;
-    server_name _; # Obsługuje każde żądanie na tym porcie
+    server_name _;
     root /opt/ai_firma_dashboard/static;
     index index.html;
 
-    # Wyłącz logowanie dostępu do API dla prywatności
     location /api/ {
         access_log off;
         proxy_pass http://127.0.0.1:5000;
@@ -281,43 +286,4 @@ killasgroup=true
 stderr_logfile=/var/log/dashboard-api.err.log
 stdout_logfile=/var/log/dashboard-api.out.log
 environment=PYTHONUNBUFFERED="1"
-```else
-    echo "[ERROR] Błąd konfiguracji Nginx. Zmiany nie zostały zastosowane."
-    exit 1
-fi
-```
-
-## backup_configs.sh
-```bash
-#!/bin/bash
-# backup_configs.sh - Tworzy backup konfiguracji
-echo "[INFO] Rozpoczynam backup konfiguracji..."
-BACKUP_DIR="$HOME/backups/$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$BACKUP_DIR"
-
-# Backup konfiguracji Nginx
-if [ -d "/etc/nginx" ]; then
-    sudo cp -r /etc/nginx "$BACKUP_DIR/nginx"
-    echo "[INFO] Backup Nginx wykonany: $BACKUP_DIR/nginx"
-fi
-
-# Backup konfiguracji systemowych
-if [ -f "/etc/hosts" ]; then
-    cp /etc/hosts "$BACKUP_DIR/"
-fi
-
-echo "[SUCCESS] Backup zakończony: $BACKUP_DIR"
-```
-
-## test_system.sh
-```bash
-#!/bin/bash
-# test_system.sh - Testuje podstawowe funkcje systemu
-echo "=== TEST SYSTEMU AI FIRMA ==="
-echo "Data: $(date)"
-echo "Host: $(hostname)"
-echo "Użytkownik: $(whoami)"
-echo "Katalog: $(pwd)"
-echo ""
-echo "✅ Test zakończony pomyślnie"
 ```
