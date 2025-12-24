@@ -4,7 +4,7 @@
 # AUTOR: System Wojtek/CEO
 # DATA: 2024-12-24
 # MODEL: 2-plikowy (Gotowy do EDITOR.md)
-# WERSJA: 1.2 (z implementacją sprawdz_narzędzia i utworz_kopie_zapasowa)
+# WERSJA: 1.3 (z implementacją skonfiguruj_autoryzacje)
 # ============================================================================
 # ZASADY:
 # 1. Używa STAŁYCH poświadczeń: Agnostyk / Castorama13.
@@ -94,16 +94,60 @@ function utworz_kopie_zapasowa() {
 
 function skonfiguruj_autoryzacje() {
     echo "[3] Konfiguracja HTTP Basic Auth..."
-    # TODO: 1. Utworzenie HTPASSWD_FILE z poświadczeniami.
-    # TODO: 2. Modyfikacja NGINX_SITE_CONFIG (dyrektywy auth_basic).
-    echo "   > Funkcja nie zaimplementowana."
+    
+    # --- CZĘŚĆ A: TWORZENIE PLIKU Z HASŁAMI (.htpasswd) ---
+    echo "   [3.1] Tworzenie pliku z poświadczeniami: $HTPASSWD_FILE"
+    # Użyj htpasswd w trybie batch (-b) z opcją -c (create) aby utworzyć lub nadpisać plik
+    htpasswd -bc "$HTPASSWD_FILE" "$AUTH_USER" "$AUTH_PASS" 2>/dev/null
+    
+    if [[ $? -eq 0 ]]; then
+        echo "   [OK] Plik $HTPASSWD_FILE utworzony z użytkownikiem: $AUTH_USER"
+        # Zabezpiecz plik - tylko do odczytu dla root
+        chmod 600 "$HTPASSWD_FILE"
+    else
+        echo "   [BŁĄD] Nie udało się utworzyć pliku z hasłami."
+        exit 1
+    fi
+    
+    # --- CZĘŚĆ B: MODYFIKACJA KONFIGURACJI NGINX ---
+    echo "   [3.2] Modyfikacja konfiguracji Nginx ($NGINX_SITE_CONFIG)..."
+    
+    # Sprawdź, czy dyrektywy auth_basic już istnieją (zabezpieczenie przed powtórzeniem)
+    if grep -q "auth_basic" "$NGINX_SITE_CONFIG"; then
+        echo "   [UWAGA] Konfiguracja już zawiera dyrektywy 'auth_basic'. Pomijam modyfikację."
+    else
+        # GŁÓWNA LOGIKA MODYFIKACJI (Opcja C - sed)
+        # Szukamy bloku 'location /' i dodajemy dyrektywy PRZED zamykającym '}'
+        # Zakładamy, że w bloku jest już przynajmniej 'proxy_pass ...;'
+        local temp_file="${NGINX_SITE_CONFIG}.tmp"
+        
+        # Użyj sed do wstawienia dyrektyw. Szukamy linii z '}' zamykającą blok 'location /'
+        # i wstawiamy przed nią nasze dwie linie.
+        sed -i '/location \/.*{/,/}/ {
+            /}/i\
+    auth_basic "Restricted Access";\
+    auth_basic_user_file '"$HTPASSWD_FILE"';
+        }' "$NGINX_SITE_CONFIG"
+        
+        # Weryfikacja, czy modyfikacja się powiodła (czy pojawiły się nowe linie)
+        if grep -q "auth_basic" "$NGINX_SITE_CONFIG"; then
+            echo "   [OK] Dyrektywy auth_basic dodane do konfiguracji."
+        else
+            echo "   [BŁĄD] Nie udało się dodać dyrektyw auth_basic. Struktura pliku może być niestandardowa."
+            echo "   [ROZWIĄZANIE] Ręcznie dodaj do bloku 'location /':"
+            echo "        auth_basic \"Restricted Access\";"
+            echo "        auth_basic_user_file $HTPASSWD_FILE;"
+            exit 1
+        fi
+    fi
+    echo ""
 }
 
 function waliduj_i_przeladuj() {
     echo "[4] Walidacja i przeładowanie Nginx..."
     # TODO: 1. Uruchomienie 'nginx -t'.
     # TODO: 2. Jeśli OK: 'systemctl reload nginx'. Jeśli NIE: wywołaj procedura_awaryjna.
-    echo "   > Funkcja nie zaimplementowana."
+    echo "   > Funkcja nie w pełni zaimplementowana."
 }
 
 function procedura_awaryjna() {
@@ -128,11 +172,12 @@ function main() {
     sprawdz_narzędzia
     # KROK 2: Utwórz kopię zapasową konfiguracji
     utworz_kopie_zapasowa
-    # Kolejne kroki są nadal zakomentowane
-    # skonfiguruj_autoryzacje
+    # KROK 3: Skonfiguruj autoryzację (pliki + modyfikacja Nginx)
+    skonfiguruj_autoryzacje
+    # KROK 4: Tylko walidacja (na razie bez przeładowania)
     # waliduj_i_przeladuj
-    echo "[INFO] Funkcje 1 & 2 zaimplementowane i przetestowane."
-    echo "[INFO] Kolejny krok: implementacja 'skonfiguruj_autoryzacje'."
+    echo "[INFO] Funkcje 1, 2, 3 zaimplementowane."
+    echo "[INFO] Następny krok: Uruchom walidację (nginx -t) i ewentualne przeładowanie."
 }
 
 # --- WYKONANIE ---
