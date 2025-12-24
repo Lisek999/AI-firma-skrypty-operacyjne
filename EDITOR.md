@@ -4,7 +4,7 @@
 # AUTOR: System Wojtek/CEO
 # DATA: 2024-12-24
 # MODEL: 2-plikowy (Gotowy do EDITOR.md)
-# WERSJA: Szkielet 1.0
+# WERSJA: Szkielet 1.1 (z implementacją sprawdz_narzędzia)
 # ============================================================================
 # ZASADY:
 # 1. Używa STAŁYCH poświadczeń: Agnostyk / Castorama13.
@@ -28,11 +28,28 @@ SERVER_IP="57.128.247.215"                                # Docelowy adres IP
 AUTH_USER="Agnostyk"
 AUTH_PASS="Castorama13"
 
-# --- FUNKCJE POMOCNICZE (SZKIELET - DO ROZBUDOWY) ---
+# --- FUNKCJE POMOCNICZE ---
 function sprawdz_narzędzia() {
     echo "[1] Sprawdzanie wymaganych narzędzi (nginx, htpasswd)..."
-    # TODO: Implementacja sprawdzenia 'nginx' i 'htpasswd'.
-    echo "   > Funkcja nie zaimplementowana."
+    
+    # Sprawdź, czy nginx jest zainstalowany (poprzez sprawdzenie usługi)
+    if ! systemctl is-active --quiet nginx 2>/dev/null && ! command -v nginx >/dev/null 2>&1; then
+        echo "   [BŁĄD] Nie znaleziono usługi 'nginx' ani polecenia 'nginx'."
+        echo "   [ROZWIĄZANIE] Zainstaluj: sudo apt update && sudo apt install -y nginx"
+        exit 1
+    else
+        echo "   [OK] Nginx jest dostępny."
+    fi
+    
+    # Sprawdź, czy htpasswd jest dostępny
+    if ! command -v htpasswd >/dev/null 2>&1; then
+        echo "   [BŁĄD] Nie znaleziono polecenia 'htpasswd'."
+        echo "   [ROZWIĄZANIE] Zainstaluj pakiet: sudo apt install -y apache2-utils"
+        exit 1
+    else
+        echo "   [OK] Narzędzie 'htpasswd' (apache2-utils) jest dostępne."
+    fi
+    echo ""
 }
 
 function utworz_kopie_zapasowa() {
@@ -73,14 +90,14 @@ function main() {
     echo "Hasło: [ukryte]"
     echo "================================================"
     echo ""
-    # Kolejne kroki będą odkomentowywane i implementowane.
-    # sprawdz_narzędzia
+    # KROK 1: Sprawdź narzędzia
+    sprawdz_narzędzia
+    # Kolejne kroki są nadal zakomentowane
     # utworz_kopie_zapasowa
     # skonfiguruj_autoryzacje
     # waliduj_i_przeladuj
-    echo "[INFO] Szkielet skryptu załadowany."
-    echo "[INFO] Poszczególne funkcje są puste (TODO)."
-    echo "[INFO] Kolejny krok: implementacja funkcji 'sprawdz_narzędzia'."
+    echo "[INFO] Funkcja 'sprawdz_narzędzia' zaimplementowana i przetestowana."
+    echo "[INFO] Kolejny krok: implementacja 'utworz_kopie_zapasowa'."
 }
 
 # --- WYKONANIE ---
