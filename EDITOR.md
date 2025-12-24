@@ -1,16 +1,28 @@
 #!/bin/bash
 
-echo "=== NAPRAWA FUNKCJI getscript ==="
-echo "1. Usuwam starą, uszkodzoną funkcję..."
+echo "=== RADYKALNE SPRZĄTANIE ~/.bashrc ==="
 
-# Znajdź i usuń starą funkcję getscript (od 'getscript() {' do następnego '}')
+# 1. Zrób backup
+cp ~/.bashrc ~/.bashrc.backup.$(date +%s)
+echo "1. Backup utworzony: ~/.bashrc.backup.*"
+
+# 2. Usuń WSZYSTKIE fragmenty związane z getscript
+echo "2. Usuwam wszystkie fragmenty getscript..."
+# Usuń od 'getscript() {' do '}'
 sed -i '/^getscript() {/,/^}/d' ~/.bashrc
+# Usuń pozostałe pojedyncze linie z getscript
+sed -i '/getscript/d' ~/.bashrc
+# Usuń puste linie i nadmiarowe komentarze
+sed -i '/^# Funkcja do pobierania/,+5d' ~/.bashrc
 
-echo "2. Dodaję nową, poprawną funkcję..."
+# 3. Dodaj JEDNĄ, POPRAWNĄ funkcję na końcu
+echo "3. Dodaję poprawną funkcję getscript..."
 
-# Dodaj nową funkcję na końcu pliku
 cat >> ~/.bashrc << 'EOF'
 
+# ============================================
+# FUNKCJA getscript - System wymiany skryptów
+# ============================================
 getscript() {
     # 1. Pobierz adres źródłowy z pliku ustawień
     SETTINGS_URL="https://raw.githubusercontent.com/Lisek999/AI-firma-skrypty-operacyjne/main/SKRYPTY_OPERACYJNE.md"
@@ -35,6 +47,36 @@ getscript() {
     mkdir -p "$SCRIPT_DIR"
 
     if [ -n "$1" ]; then
+        FILENAME="$1.sh"
+    else
+        FILENAME="skrypt_$(date +%Y%m%d_%H%M%S).sh"
+    fi
+
+    FULL_PATH="$SCRIPT_DIR/$FILENAME"
+
+    # 4. Zapisz skrypt do pliku
+    echo "$SCRIPT_CONTENT" > "$FULL_PATH"
+    chmod +x "$FULL_PATH"
+
+    echo "========================================"
+    echo "SKRYPT ZAPISANY JAKO: $FULL_PATH"
+    echo "ŹRÓDŁO: $SOURCE_URL"
+    echo "========================================"
+
+    # 5. Wykonaj zapisany skrypt
+    echo "URUCHAMIANIE..."
+    echo "---"
+    bash "$FULL_PATH"
+}
+EOF
+
+echo "4. Przeładowuję ~/.bashrc..."
+# Przeładuj w nowym procesie, aby uniknąć konfliktów
+bash -c "source ~/.bashrc && type getscript && echo '✅ Funkcja getscript jest gotowa!' || echo '⚠️  Wymagane ręczne przeładowanie: source ~/.bashrc'"
+
+echo "=== SPRZĄTANIE ZAKOŃCZONE ==="
+echo "Uruchom: source ~/.bashrc"
+echo "Następnie: getscript test"    if [ -n "$1" ]; then
         FILENAME="$1.sh"
     else
         FILENAME="skrypt_$(date +%Y%m%d_%H%M%S).sh"
