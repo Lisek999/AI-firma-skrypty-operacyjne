@@ -4,7 +4,7 @@
 # AUTOR: System Wojtek/CEO
 # DATA: 2024-12-24
 # MODEL: 2-plikowy (Gotowy do EDITOR.md)
-# WERSJA: Szkielet 1.1 (z implementacją sprawdz_narzędzia)
+# WERSJA: 1.2 (z implementacją sprawdz_narzędzia i utworz_kopie_zapasowa)
 # ============================================================================
 # ZASADY:
 # 1. Używa STAŁYCH poświadczeń: Agnostyk / Castorama13.
@@ -54,8 +54,42 @@ function sprawdz_narzędzia() {
 
 function utworz_kopie_zapasowa() {
     echo "[2] Tworzenie kopii zapasowej konfiguracji..."
-    # TODO: Implementacja stworzenia BACKUP_DIR i skopiowania NGINX_SITE_CONFIG.
-    echo "   > Funkcja nie zaimplementowana."
+    
+    # 1. SPRAWDŹ, CZY PLIK KONFIGURACYJNY ISTNIEJE
+    if [[ ! -f "$NGINX_SITE_CONFIG" ]]; then
+        echo "   [BŁĄD] Nie znaleziono pliku konfiguracyjnego: $NGINX_SITE_CONFIG"
+        echo "   [ROZWIĄZANIE] Upewnij się, że Nginx jest poprawnie skonfigurowany dla dashboardu."
+        exit 1
+    fi
+    echo "   [OK] Znaleziono plik konfiguracyjny: $NGINX_SITE_CONFIG"
+    
+    # 2. UTWÓRZ KATALOG BACKUP, JEŚLI NIE ISTNIEJE
+    if [[ ! -d "$BACKUP_DIR" ]]; then
+        echo "   [INFO] Katalog backup nie istnieje. Tworzę: $BACKUP_DIR"
+        mkdir -p "$BACKUP_DIR"
+        if [[ $? -eq 0 ]]; then
+            echo "   [OK] Katalog backup utworzony."
+        else
+            echo "   [BŁĄD] Nie udało się utworzyć katalogu backup."
+            exit 1
+        fi
+    fi
+    
+    # 3. STWÓRZ KOPIĘ ZAPASOWĄ Z TIMESTAMPEM
+    local timestamp=$(date +"%Y%m%d_%H%M%S")
+    local backup_file="$BACKUP_DIR/$(basename "$NGINX_SITE_CONFIG")_${timestamp}.backup"
+    
+    cp "$NGINX_SITE_CONFIG" "$backup_file"
+    
+    if [[ $? -eq 0 ]]; then
+        echo "   [OK] Utworzono kopię zapasową: $backup_file"
+        # (Opcjonalnie) Zabezpiecz uprawnienia kopii
+        chmod 600 "$backup_file"
+    else
+        echo "   [BŁĄD] Nie udało się utworzyć kopii zapasowej."
+        exit 1
+    fi
+    echo ""
 }
 
 function skonfiguruj_autoryzacje() {
@@ -82,7 +116,7 @@ function procedura_awaryjna() {
     exit 1
 }
 
-# --- LOGIKA GŁÓWNA (SZKIELET) ---
+# --- LOGIKA GŁÓWNA ---
 function main() {
     echo "================================================"
     echo "Rozpoczynam konfigurację Basic Auth dla: $SERVER_IP"
@@ -92,12 +126,13 @@ function main() {
     echo ""
     # KROK 1: Sprawdź narzędzia
     sprawdz_narzędzia
+    # KROK 2: Utwórz kopię zapasową konfiguracji
+    utworz_kopie_zapasowa
     # Kolejne kroki są nadal zakomentowane
-    # utworz_kopie_zapasowa
     # skonfiguruj_autoryzacje
     # waliduj_i_przeladuj
-    echo "[INFO] Funkcja 'sprawdz_narzędzia' zaimplementowana i przetestowana."
-    echo "[INFO] Kolejny krok: implementacja 'utworz_kopie_zapasowa'."
+    echo "[INFO] Funkcje 1 & 2 zaimplementowane i przetestowane."
+    echo "[INFO] Kolejny krok: implementacja 'skonfiguruj_autoryzacje'."
 }
 
 # --- WYKONANIE ---
