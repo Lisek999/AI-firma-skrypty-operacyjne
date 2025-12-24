@@ -4,13 +4,14 @@
 # AUTOR: System Wojtek/CEO
 # DATA: 2024-12-24
 # MODEL: 2-plikowy (Gotowy do EDITOR.md)
-# WERSJA: 1.4 FINAL (pełna implementacja walidacji, przeładowania i rollbacku) - POPRAWIONA
+# WERSJA: 1.5 FINAL (Basic Auth tylko dla frontendu, bez /api/)
 # ============================================================================
 # ZASADY:
 # 1. Używa STAŁYCH poświadczeń: Agnostyk / Castorama13.
-# 2. Zawiera pełną logikę: backup, modyfikację, walidację, rollback.
-# 3. Działa TYLKO z uprawnieniami sudo.
-# 4. Dystrybucja: GitHub (EDITOR.md) -> getscript -> VPS.
+# 2. Zabezpiecza TYLKO frontend (location /). Backend (/api/) dostępny lokalnie.
+# 3. Zawiera pełną logikę: backup, modyfikację, walidację, rollback.
+# 4. Działa TYLKO z uprawnieniami sudo.
+# 5. Dystrybucja: GitHub (EDITOR.md) -> getscript -> VPS.
 # ============================================================================
 
 # --- BEZPIECZEŃSTWO ---
@@ -93,7 +94,7 @@ function utworz_kopie_zapasowa() {
 }
 
 function skonfiguruj_autoryzacje() {
-    echo "[3] Konfiguracja HTTP Basic Auth..."
+    echo "[3] Konfiguracja HTTP Basic Auth (TYLKO dla frontendu)..."
     
     # --- CZĘŚĆ A: TWORZENIE PLIKU Z HASŁAMI (.htpasswd) ---
     echo "   [3.1] Tworzenie pliku z poświadczeniami: $HTPASSWD_FILE"
@@ -112,30 +113,34 @@ function skonfiguruj_autoryzacje() {
     # --- CZĘŚĆ B: MODYFIKACJA KONFIGURACJI NGINX ---
     echo "   [3.2] Modyfikacja konfiguracji Nginx ($NGINX_SITE_CONFIG)..."
     
-    # Sprawdź, czy dyrektywy auth_basic już istnieją (zabezpieczenie przed powtórzeniem)
-    if grep -q "auth_basic" "$NGINX_SITE_CONFIG"; then
-        echo "   [UWAGA] Konfiguracja już zawiera dyrektywy 'auth_basic'. Pomijam modyfikację."
-    else
-        # GŁÓWNA LOGIKA MODYFIKACJI (Opcja C - sed)
-        # Szukamy bloku 'location /' i dodajemy dyrektywy PRZED zamykającym '}'
-        # Zakładamy, że w bloku jest już przynajmniej 'proxy_pass ...;'
+    # 1. Upewnij się, że Basic Auth jest w 'location /' (frontend)
+    if ! grep -q 'auth_basic.*location /' "$NGINX_SITE_CONFIG"; then
+        echo "   [INFO] Dodaję Basic Auth do 'location /' (frontend)..."
         sed -i '/location \/.*{/,/}/ {
             /}/i\
     auth_basic "Restricted Access";\
     auth_basic_user_file '"$HTPASSWD_FILE"';
         }' "$NGINX_SITE_CONFIG"
-        
-        # Weryfikacja, czy modyfikacja się powiodła (czy pojawiły się nowe linie)
-        if grep -q "auth_basic" "$NGINX_SITE_CONFIG"; then
-            echo "   [OK] Dyrektywy auth_basic dodane do konfiguracji."
-        else
-            echo "   [BŁĄD] Nie udało się dodać dyrektyw auth_basic. Struktura pliku może być niestandardowa."
-            echo "   [ROZWIĄZANIE] Ręcznie dodaj do bloku 'location /':"
-            echo "        auth_basic \"Restricted Access\";"
-            echo "        auth_basic_user_file $HTPASSWD_FILE;"
-            exit 1
-        fi
+    else
+        echo "   [OK] Basic Auth już obecny w 'location /'."
     fi
+    
+    # 2. USUŃ Basic Auth z 'location /api/' (backend) - jeśli istnieje
+    if grep -q 'auth_basic.*location /api/' "$NGINX_SITE_CONFIG"; then
+        echo "   [INFO] Usuwam Basic Auth z 'location /api/' (backend)..."
+        # Usuń linie zawierające 'auth_basic' wewnątrz bloku 'location /api/'
+        sed -i '/location \/api\/.*{/,/}/ {
+            /auth_basic/d
+        }' "$NGINX_SITE_CONFIG"
+        echo "   [OK] Basic Auth usunięty z 'location /api/'."
+    else
+        echo "   [OK] Basic Auth nieobecny w 'location /api/' (tak jak trzeba)."
+    fi
+    
+    # Ostateczna weryfikacja
+    echo "   [INFO] Stan końcowy:"
+    echo "     - Frontend (location /): $(grep -q 'auth_basic.*location /' "$NGINX_SITE_CONFIG" && echo 'ZABEZPIECZONY' || echo 'NIEZABEZPIECZONY')"
+    echo "     - Backend (location /api/): $(grep -q 'auth_basic.*location /api/' "$NGINX_SITE_CONFIG" && echo 'ZABEZPIECZONY (UWAGA!)' || echo 'OTWARTY (tylko lokalnie)')"
     echo ""
 }
 
@@ -198,7 +203,7 @@ function waliduj_i_przeladuj() {
         systemctl reload nginx
         if [[ $? -eq 0 ]]; then
             echo "   [OK] Nginx przeładowany pomyślnie."
-            echo "   [SUKCES] Konfiguracja Basic Auth została aktywowana dla $SERVER_IP"
+            echo "   [SUKCES] Konfiguracja Basic Auth (tylko frontend) aktywowana dla $SERVER_IP"
         else
             echo "   [BŁĄD] Nie udało się przeładować Nginx (usługa może mieć problem)."
             echo "   [INFO] Wywołuję procedurę awaryjną..."
@@ -216,6 +221,7 @@ function waliduj_i_przeladuj() {
 function main() {
     echo "================================================"
     echo "Rozpoczynam konfigurację Basic Auth dla: $SERVER_IP"
+    echo "UŻYCIE: TYLKO frontend (location /). Backend (/api/) otwarty lokalnie."
     echo "Użytkownik: $AUTH_USER"
     echo "Hasło: [ukryte]"
     echo "================================================"
@@ -224,29 +230,31 @@ function main() {
     sprawdz_narzędzia
     # KROK 2: Utwórz kopię zapasową konfiguracji
     utworz_kopie_zapasowa
-    # KROK 3: Skonfiguruj autoryzację (pliki + modyfikacja Nginx)
+    # KROK 3: Skonfiguruj autoryzację (tylko frontend)
     skonfiguruj_autoryzacje
     # KROK 4: Walidacja i przeładowanie
     waliduj_i_przeladuj
     
-    # --- INSTRUKCJA TESTOWA DLA CEO (punkt 3.9 z Planu Ataku) ---
+    # --- INSTRUKCJA TESTOWA DLA CEO ---
     echo "================================================"
     echo "INSTRUKCJA TESTOWA:"
-    echo "1. TEST POZYTYWNY (dostęp przyznany):"
+    echo "1. TEST POZYTYWNY (dostęp do frontendu przyznany):"
     echo "   curl -u 'Agnostyk:Castorama13' http://$SERVER_IP"
     echo ""
-    echo "2. TEST NEGATYWNY (dostęp zabroniony - brak lub złe dane):"
+    echo "2. TEST NEGATYWNY (dostęp do frontendu zabroniony):"
     echo "   curl -v http://$SERVER_IP"
-    echo "   (Oczekiwany kod odpowiedzi: 401 Unauthorized)"
+    echo "   (Oczekiwany kod: 401 Unauthorized)"
     echo ""
-    echo "3. TEST AWARYJNY (przywrócenie konfiguracji):"
-    echo "   # Ręczne wywołanie procedury awaryjnej:"
+    echo "3. TEST BACKENDU (dostęp lokalny, bez Basic Auth):"
+    echo "   curl -v http://$SERVER_IP/api/"
+    echo "   (Powinno działać, może zwrócić 200 lub błąd aplikacji, ale NIE 401)"
+    echo ""
+    echo "4. TEST AWARYJNY (przywrócenie konfiguracji):"
     echo "   sudo $0 --rollback"
     echo "================================================"
 }
 
 # --- OPCJA AWARYJNEGO WYCOFANIA (dla ręcznego uruchomienia) ---
-# POPRAWKA: Sprawdzamy, czy pierwszy argument istnieje, zanim go porównamy.
 if [[ $# -gt 0 ]] && [[ "$1" == "--rollback" ]]; then
     echo "RĘCZNE WYWOŁANIE PROCEDURY AWARYJNEGO WYCOFANIA..."
     procedura_awaryjna
