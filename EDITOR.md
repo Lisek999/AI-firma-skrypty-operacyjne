@@ -1,4 +1,2 @@
-echo "=== SYSTEM GOTOWY ==="
-echo "Data: $(date)"
-echo "Działa perfekcyjnie!"
-
+echo "=== SYSTEM 2 PLIKÓW GOTOWY ==="
+echo "Ostatni test: $(date)"
