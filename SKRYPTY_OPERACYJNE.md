@@ -4,6 +4,7 @@
 ## deploy_nginx_site.sh
 ```bash
 #!/bin/bash
+# deploy_nginx_site.sh - Testowy skrypt IaC Iteracja 1
 echo "[INFO] Rozpoczynam test deployu Nginx..."
 CONF_SRC="$HOME/ai-firma-vps/konfiguracje/nginx/sites-available/default"
 CONF_DST="/etc/nginx/sites-available/default"
@@ -28,18 +29,34 @@ fi
 ## backup_configs.sh
 ```bash
 #!/bin/bash
-echo "[INFO] Ten skrypt będzie tworzył backup konfiguracji"
-echo "[TODO]: Zaimplementuj backup"
+# backup_configs.sh - Tworzy backup konfiguracji
+echo "[INFO] Rozpoczynam backup konfiguracji..."
+BACKUP_DIR="$HOME/backups/$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+
+# Backup konfiguracji Nginx
+if [ -d "/etc/nginx" ]; then
+    sudo cp -r /etc/nginx "$BACKUP_DIR/nginx"
+    echo "[INFO] Backup Nginx wykonany: $BACKUP_DIR/nginx"
+fi
+
+# Backup konfiguracji systemowych
+if [ -f "/etc/hosts" ]; then
+    cp /etc/hosts "$BACKUP_DIR/"
+fi
+
+echo "[SUCCESS] Backup zakończony: $BACKUP_DIR"
 ```
 
-## nazwa_skryptu_3.sh
+## test_system.sh
 ```bash
 #!/bin/bash
-echo "Przykład - wklej tu nowy skrypt"
-```
-
-## nazwa_skryptu_4.sh
-```bash
-#!/bin/bash
-echo "Kolejny przykład"
+# test_system.sh - Testuje podstawowe funkcje systemu
+echo "=== TEST SYSTEMU AI FIRMA ==="
+echo "Data: $(date)"
+echo "Host: $(hostname)"
+echo "Użytkownik: $(whoami)"
+echo "Katalog: $(pwd)"
+echo ""
+echo "✅ Test zakończony pomyślnie"
 ```
