@@ -1,39 +1,3 @@
-#!/bin/bash
-
-echo "=== RADYKALNE SPRZĄTANIE ~/.bashrc ==="
-
-# 1. Zrób backup
-cp ~/.bashrc ~/.bashrc.backup.$(date +%s)
-echo "1. Backup utworzony: ~/.bashrc.backup.*"
-
-# 2. Usuń WSZYSTKIE fragmenty związane z getscript
-echo "2. Usuwam wszystkie fragmenty getscript..."
-# Usuń od 'getscript() {' do '}'
-sed -i '/^getscript() {/,/^}/d' ~/.bashrc
-# Usuń pozostałe pojedyncze linie z getscript
-sed -i '/getscript/d' ~/.bashrc
-# Usuń puste linie i nadmiarowe komentarze
-sed -i '/^# Funkcja do pobierania/,+5d' ~/.bashrc
-
-# 3. Dodaj JEDNĄ, POPRAWNĄ funkcję na końcu
-echo "3. Dodaję poprawną funkcję getscript..."
-
-cat >> ~/.bashrc << 'EOF'
-
-# ============================================
-# FUNKCJA getscript - System wymiany skryptów
-# ============================================
-getscript() {
-    # 1. Pobierz adres źródłowy z pliku ustawień
-    SETTINGS_URL="https://raw.githubusercontent.com/Lisek999/AI-firma-skrypty-operacyjne/main/SKRYPTY_OPERACYJNE.md"
-    SOURCE_URL=$(curl -s "$SETTINGS_URL")
-
-    if [ -z "$SOURCE_URL" ]; then
-        echo "BŁĄD: Nie udało się pobrać adresu źródłowego z pliku ustawień."
-        return 1
-    fi
-
-    # 2. Pobierz skrypt
     SCRIPT_CONTENT=$(curl -s "$SOURCE_URL")
 
     if [ -z "$SCRIPT_CONTENT" ]; then
