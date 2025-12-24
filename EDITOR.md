@@ -4,7 +4,7 @@
 # AUTOR: System Wojtek/CEO
 # DATA: 2024-12-24
 # MODEL: 2-plikowy (Gotowy do EDITOR.md)
-# WERSJA: 1.3 (z implementacją skonfiguruj_autoryzacje)
+# WERSJA: 1.4 FINAL (pełna implementacja walidacji, przeładowania i rollbacku)
 # ============================================================================
 # ZASADY:
 # 1. Używa STAŁYCH poświadczeń: Agnostyk / Castorama13.
@@ -83,7 +83,7 @@ function utworz_kopie_zapasowa() {
     
     if [[ $? -eq 0 ]]; then
         echo "   [OK] Utworzono kopię zapasową: $backup_file"
-        # (Opcjonalnie) Zabezpiecz uprawnienia kopii
+        # Zabezpiecz uprawnienia kopii
         chmod 600 "$backup_file"
     else
         echo "   [BŁĄD] Nie udało się utworzyć kopii zapasowej."
@@ -119,10 +119,6 @@ function skonfiguruj_autoryzacje() {
         # GŁÓWNA LOGIKA MODYFIKACJI (Opcja C - sed)
         # Szukamy bloku 'location /' i dodajemy dyrektywy PRZED zamykającym '}'
         # Zakładamy, że w bloku jest już przynajmniej 'proxy_pass ...;'
-        local temp_file="${NGINX_SITE_CONFIG}.tmp"
-        
-        # Użyj sed do wstawienia dyrektyw. Szukamy linii z '}' zamykającą blok 'location /'
-        # i wstawiamy przed nią nasze dwie linie.
         sed -i '/location \/.*{/,/}/ {
             /}/i\
     auth_basic "Restricted Access";\
@@ -143,21 +139,77 @@ function skonfiguruj_autoryzacje() {
     echo ""
 }
 
-function waliduj_i_przeladuj() {
-    echo "[4] Walidacja i przeładowanie Nginx..."
-    # TODO: 1. Uruchomienie 'nginx -t'.
-    # TODO: 2. Jeśli OK: 'systemctl reload nginx'. Jeśli NIE: wywołaj procedura_awaryjna.
-    echo "   > Funkcja nie w pełni zaimplementowana."
-}
-
 function procedura_awaryjna() {
     echo "[!] Uruchomienie procedury awaryjnego wycofania..."
-    # TODO: 1. Przywrócenie NGINX_SITE_CONFIG z BACKUP_DIR.
-    # TODO: 2. Usunięcie HTPASSWD_FILE.
-    # TODO: 3. Przeładowanie nginx.
-    # TODO: 4. Zakończenie skryptu z błędem.
-    echo "   > Funkcja nie zaimplementowana."
+    
+    # 1. Znajdź NAJNOWSZĄ kopię zapasową
+    local latest_backup=$(ls -t "$BACKUP_DIR"/*.backup 2>/dev/null | head -1)
+    
+    if [[ -z "$latest_backup" ]]; then
+        echo "   [BŁĄD KRYTYCZNY] Nie znaleziono żadnej kopii zapasowej w $BACKUP_DIR."
+        echo "   Nie mogę przywrócić konfiguracji. Wymagana interwencja ręczna."
+        exit 1
+    fi
+    
+    echo "   [INFO] Przywracam konfigurację z: $latest_backup"
+    echo "   [INFO] Do: $NGINX_SITE_CONFIG"
+    
+    # 2. Przywróć kopię
+    cp "$latest_backup" "$NGINX_SITE_CONFIG"
+    if [[ $? -ne 0 ]]; then
+        echo "   [BŁĄD] Nie udało się przywrócić kopii zapasowej."
+        exit 1
+    fi
+    
+    # 3. Usuń plik z hasłami (jeśli istnieje)
+    if [[ -f "$HTPASSWD_FILE" ]]; then
+        rm -f "$HTPASSWD_FILE"
+        echo "   [INFO] Usunięto plik z hasłami: $HTPASSWD_FILE"
+    fi
+    
+    # 4. Przeładuj Nginx, aby wrócić do stanu początkowego
+    echo "   [INFO] Przeładowanie Nginx (powrót do oryginalnej konfiguracji)..."
+    systemctl reload nginx
+    if [[ $? -eq 0 ]]; then
+        echo "   [OK] Nginx przeładowany. Konfiguracja przywrócona."
+    else
+        echo "   [BŁĄD] Nie udało się przeładować Nginx po przywróceniu kopii."
+        echo "   Sprawdź stan usługi ręcznie: systemctl status nginx"
+    fi
+    
+    # 5. Zakończ skrypt z błędem
+    echo "   [KONIEC] Skrypt zakończony z powodu błędu walidacji. Zmiany wycofane."
     exit 1
+}
+
+function waliduj_i_przeladuj() {
+    echo "[4] Walidacja i przeładowanie Nginx..."
+    
+    # 1. Walidacja konfiguracji
+    echo "   [4.1] Walidacja konfiguracji (nginx -t)..."
+    nginx -t 2>&1
+    local validation_result=$?
+    
+    if [[ $validation_result -eq 0 ]]; then
+        echo "   [OK] Konfiguracja Nginx jest poprawna."
+        
+        # 2. Przeładowanie Nginx
+        echo "   [4.2] Przeładowanie usługi Nginx (systemctl reload nginx)..."
+        systemctl reload nginx
+        if [[ $? -eq 0 ]]; then
+            echo "   [OK] Nginx przeładowany pomyślnie."
+            echo "   [SUKCES] Konfiguracja Basic Auth została aktywowana dla $SERVER_IP"
+        else
+            echo "   [BŁĄD] Nie udało się przeładować Nginx (usługa może mieć problem)."
+            echo "   [INFO] Wywołuję procedurę awaryjną..."
+            procedura_awaryjna
+        fi
+    else
+        echo "   [BŁĄD] Konfiguracja Nginx jest NIEPOPRAWNA (nginx -t zwrócił błąd)."
+        echo "   [INFO] Wywołuję procedurę awaryjną..."
+        procedura_awaryjna
+    fi
+    echo ""
 }
 
 # --- LOGIKA GŁÓWNA ---
@@ -174,11 +226,30 @@ function main() {
     utworz_kopie_zapasowa
     # KROK 3: Skonfiguruj autoryzację (pliki + modyfikacja Nginx)
     skonfiguruj_autoryzacje
-    # KROK 4: Tylko walidacja (na razie bez przeładowania)
-    # waliduj_i_przeladuj
-    echo "[INFO] Funkcje 1, 2, 3 zaimplementowane."
-    echo "[INFO] Następny krok: Uruchom walidację (nginx -t) i ewentualne przeładowanie."
+    # KROK 4: Walidacja i przeładowanie
+    waliduj_i_przeladuj
+    
+    # --- INSTRUKCJA TESTOWA DLA CEO (punkt 3.9 z Planu Ataku) ---
+    echo "================================================"
+    echo "INSTRUKCJA TESTOWA:"
+    echo "1. TEST POZYTYWNY (dostęp przyznany):"
+    echo "   curl -u 'Agnostyk:Castorama13' http://$SERVER_IP"
+    echo ""
+    echo "2. TEST NEGATYWNY (dostęp zabroniony - brak lub złe dane):"
+    echo "   curl -v http://$SERVER_IP"
+    echo "   (Oczekiwany kod odpowiedzi: 401 Unauthorized)"
+    echo ""
+    echo "3. TEST AWARYJNY (przywrócenie konfiguracji):"
+    echo "   # Ręczne wywołanie procedury awaryjnej:"
+    echo "   sudo $0 --rollback"
+    echo "================================================"
 }
+
+# --- OPCJA AWARYJNEGO WYCOFANIA (dla ręcznego uruchomienia) ---
+if [[ "$1" == "--rollback" ]]; then
+    echo "RĘCZNE WYWOŁANIE PROCEDURY AWARYJNEGO WYCOFANIA..."
+    procedura_awaryjna
+fi
 
 # --- WYKONANIE ---
 # Zabezpieczenie przed uruchomieniem bez sudo
