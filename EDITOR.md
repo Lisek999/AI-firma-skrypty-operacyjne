@@ -1,302 +1,188 @@
 #!/bin/bash
+# Skrypt: Dodanie endpointu Gold Image do app.py
+# Użycie: Skopiuj całą zawartość tego bloku i wklej do EDITOR.md na GitHubie
 
-# ============================================================================
-# create_gold_image.sh - WERSJA 100% FINALNA
-# Gold Image Creator - Faza 1 Stabilna
-# 
-# OSTATECZNA POPRAWKA: Log commita na stderr dla czystego outputu
-# ============================================================================
+cat > /tmp/add_gold_image_endpoint.py << 'EOF'
+"""
+Skrypt modyfikacji app.py - dodanie endpointu /api/gold_image/create
+Uruchom: python3 /tmp/add_gold_image_endpoint.py
+"""
 
-# --- KONFIGURACJA ---
-REPO_ROOT="/home/ubuntu/ai_firma_dokumenty"
-BACKUP_DIR="${REPO_ROOT}/gold_image_v1.0"
-REPORT_FILE="${REPO_ROOT}/GOLD_IMAGE_v1.0.md"
-TAG_NAME="v1.0-stable"
-COMMIT_MSG="Gold Image - Faza 1 Stabilna"
-UPDATE_MSG="Update report with final commit hash"
-CURRENT_DATE=$(date '+%Y-%m-%d %H:%M:%S')
+import re
+import sys
+import os
 
-# --- TABLICA PLIKÓW (PRZYKŁADOWA - DO ZASTĄPIENIA RZECZYWISTĄ LISTĄ) ---
-declare -a FILES_TO_BACKUP=(
-    "/etc/nginx/nginx.conf"
-    "/home/ubuntu/.bashrc"
-    "/opt/moja_aplikacja/config.yaml"
-    "/var/www/html/index.php"
-)
+def find_api_section(content):
+    """Znajduje sekcję z endpointami API w app.py"""
+    lines = content.split('\n')
+    
+    # Szukamy ostatniego endpointu przed blokiem if __name__ == '__main__'
+    for i, line in enumerate(lines):
+        if line.strip().startswith('@app.route("/api/'):
+            api_start = i
+        if line.strip() == "if __name__ == '__main__':":
+            return api_start, i
+    
+    return None, None
 
-# --- FUNKCJE POMOCNICZE ---
-log_info() {
-    echo "[INFO] ${CURRENT_DATE} - $1"
-}
-
-log_warning() {
-    echo "[WARNING] ${CURRENT_DATE} - $1" >&2
-}
-
-log_error() {
-    echo "[ERROR] ${CURRENT_DATE} - $1" >&2
-    exit 1
-}
-
-# --- WALIDACJA WCZEŚNIEJSZA (pkt 3.3) ---
-validate_git_status() {
-    log_info "Sprawdzanie stanu repozytorium Git..."
+def insert_endpoint(content):
+    """Wstawia nowy endpoint do app.py"""
     
-    if ! git rev-parse --git-dir > /dev/null 2>&1; then
-        log_error "Brak repozytorium Git w bieżącym katalogu!"
-    fi
+    # Szukamy gdzie wstawić nowy endpoint
+    api_start, api_end = find_api_section(content)
     
-    local git_changes=$(git status --porcelain | grep -v '^?? gold_image_v1.0/')
+    if api_start is None:
+        print("ERROR: Nie znaleziono sekcji API w pliku app.py")
+        return None
     
-    if [[ -n "${git_changes}" ]]; then
-        echo "================================================"
-        echo "BŁĄD: Repozytorium ma niezcommitowane zmiany!"
-        echo "Zmiany wykryte:"
-        echo "${git_changes}"
-        echo ""
-        echo "Proszę wykonaj:"
-        echo "  git status               # zobacz zmiany"
-        echo "  git add .                # dodaj wszystko"
-        echo "  git commit -m 'message'  # zcommituj"
-        echo "lub:"
-        echo "  git stash                # schowaj zmiany tymczasowo"
-        echo "================================================"
-        exit 1
-    fi
+    # Nowy endpoint do wstawienia
+    new_endpoint = '''
+@app.route('/api/gold_image/create', methods=['POST'])
+def create_gold_image_endpoint():
+    """Endpoint do tworzenia Gold Image poprzez interfejs dashboardu"""
+    # Weryfikacja nagłówka API Key
+    api_key = request.headers.get('X-API-Key')
+    if not api_key or api_key != os.environ.get('API_KEY'):
+        return jsonify({
+            "success": False,
+            "message": "Brak autoryzacji. Nieprawidłowy lub brakujący token API.",
+            "tag": None,
+            "output": ""
+        }), 401
     
-    log_info "Repozytorium Git jest czyste - można kontynuować."
-}
-
-# --- SPRAWDZENIE TAGA ---
-check_existing_tag() {
-    if git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
-        return 0
-    fi
+    # Pobranie opisu z formularza (tylko do logowania)
+    data = request.get_json()
+    description = data.get('description', '') if data else ''
     
-    if git ls-remote --tags origin "refs/tags/${TAG_NAME}" | grep -q "${TAG_NAME}"; then
-        return 0
-    fi
+    # Logowanie żądania
+    print(f"[GOLD IMAGE] Żądanie utworzenia backupu. Opis: {description[:100]}")
     
-    return 1
-}
-
-# --- PRZYGOTOWANIE KATALOGU (pkt 3.4) ---
-prepare_backup_directory() {
-    log_info "Przygotowywanie katalogu backup: ${BACKUP_DIR}"
+    # Ścieżka do skryptu (BEZWZGLĘDNA)
+    script_path = "/home/ubuntu/ai_firma_dokumenty/skrypty_operacyjne/create_gold_image.sh"
     
-    if [[ -d "${BACKUP_DIR}" ]]; then
-        rm -rf "${BACKUP_DIR}"
-        log_info "Usunięto stary katalog backup."
-    fi
+    # Sprawdzenie czy skrypt istnieje
+    if not os.path.exists(script_path):
+        return jsonify({
+            "success": False,
+            "message": "Skrypt create_gold_image.sh nie został znaleziony.",
+            "tag": None,
+            "output": f"Ścieżka: {script_path}"
+        }), 500
     
-    mkdir -p "${BACKUP_DIR}"
-    log_info "Utworzono nowy katalog backup."
-}
-
-# --- KOPIOWANIE PLIKÓW (pkt 3.4) ---
-copy_files_to_backup() {
-    local copied_count=0
-    local missing_count=0
-    
-    log_info "Rozpoczynanie kopiowania plików..."
-    echo "================================================"
-    
-    for source_file in "${FILES_TO_BACKUP[@]}"; do
-        if [[ ! -f "${source_file}" ]] && [[ ! -d "${source_file}" ]]; then
-            log_warning "❌ Plik nie istnieje: ${source_file}"
-            ((missing_count++))
-            continue
-        fi
+    try:
+        # Bezpieczne wywołanie skryptu - NIE przekazujemy danych użytkownika jako argumentów
+        import subprocess
+        import shlex
         
-        local target_file="${BACKUP_DIR}${source_file}"
-        local target_dir=$(dirname "${target_file}")
+        # Użycie Popen z przechwytywaniem outputu
+        process = subprocess.Popen(
+            ['bash', script_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=os.path.dirname(script_path)  # Uruchom w katalogu skryptu
+        )
         
-        mkdir -p "${target_dir}"
+        stdout, stderr = process.communicate(timeout=120)  # Timeout 2 minuty
+        return_code = process.returncode
         
-        if cp -r "${source_file}" "${target_file}" 2>/dev/null; then
-            log_info "✅ Skopiowano: ${source_file}"
-            ((copied_count++))
-        else
-            log_warning "⚠️  Błąd kopiowania: ${source_file}"
-        fi
-    done
+        # Łączenie outputu
+        full_output = stdout + "\n" + stderr if stderr else stdout
+        
+        # Parsowanie tagu z outputu (szukamy wzorca tagu Git)
+        import re
+        tag_match = re.search(r'tag:\s*(v\d+\.\d+[\w\.-]*)', full_output, re.IGNORECASE)
+        tag = tag_match.group(1) if tag_match else None
+        
+        if return_code == 0:
+            return jsonify({
+                "success": True,
+                "message": f"Gold Image utworzony pomyślnie{' (tag: ' + tag + ')' if tag else ''}",
+                "tag": tag,
+                "output": full_output[-2000:]  # Ostatnie 2000 znaków dla bezpieczeństwa
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Błąd podczas wykonywania skryptu tworzenia Gold Image.",
+                "tag": tag,
+                "output": full_output[-2000:]  # Ostatnie 2000 znaków
+            }), 500
+            
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            "success": False,
+            "message": "Timeout: Skrypt wykonuje się zbyt długo (ponad 2 minuty).",
+            "tag": None,
+            "output": "Proces został zabity z powodu przekroczenia czasu."
+        }), 500
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Nieoczekiwany błąd: {str(e)}",
+            "tag": None,
+            "output": ""
+        }), 500
+'''
     
-    echo "================================================"
-    echo "📊 PODSUMOWANIE KOPIOWANIA:"
-    echo "   ✅ Skopiowano plików: ${copied_count}"
-    echo "   ⚠️  Pominięto plików: ${missing_count}"
-    echo "================================================"
-}
-
-# --- TWORZENIE RAPORTU (pkt 3.5) ---
-create_initial_report() {
-    log_info "Tworzenie wstępnego raportu..."
+    # Wstawiamy nowy endpoint przed ostatnim znalezionym endpointem API
+    lines = content.split('\n')
     
-    cat > "${REPORT_FILE}" << EOF
-# GOLD IMAGE - v1.0-stable
-## Raport wykonania zrzutu systemowego
+    # Szukamy ostatniego @app.route przed if __name__
+    insert_position = api_end
+    for i in range(api_end-1, api_start-1, -1):
+        if '@app.route' in lines[i]:
+            insert_position = i + 1  # Wstawiamy po tym endpointie
+            break
+    
+    # Wstawiamy nowy endpoint
+    lines.insert(insert_position, new_endpoint)
+    
+    return '\n'.join(lines)
 
-**Data utworzenia:** ${CURRENT_DATE}
-**Tag:** ${TAG_NAME}
-**Commit hash:** [PENDING - zostanie uzupełniony po commicie]
+def main():
+    # Ścieżka do app.py (dostosuj jeśli potrzebne)
+    app_py_path = "/home/ubuntu/ai_firma_dashboard/app.py"
+    
+    if not os.path.exists(app_py_path):
+        print(f"ERROR: Plik {app_py_path} nie istnieje.")
+        print("Podaj poprawną ścieżkę do app.py:")
+        app_py_path = input().strip()
+    
+    # Wczytanie aktualnej zawartości
+    with open(app_py_path, 'r') as f:
+        content = f.read()
+    
+    # Wstawienie nowego endpointu
+    new_content = insert_endpoint(content)
+    
+    if new_content:
+        # Backup oryginalnego pliku
+        backup_path = app_py_path + '.backup_' + datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        import shutil
+        shutil.copy2(app_py_path, backup_path)
+        print(f"Utworzono backup: {backup_path}")
+        
+        # Zapisanie zmodyfikowanego pliku
+        with open(app_py_path, 'w') as f:
+            f.write(new_content)
+        
+        print("✓ Endpoint /api/gold_image/create został dodany do app.py")
+        print("✓ Restart serwisu Flask wymagany: sudo supervisorctl restart ai-firma-dashboard")
+    else:
+        print("✗ Nie udało się dodać endpointu")
 
----
-
-## Lista skopiowanych plików:
-
+if __name__ == '__main__':
+    import datetime
+    main()
 EOF
-    
-    for source_file in "${FILES_TO_BACKUP[@]}"; do
-        local target_file="${BACKUP_DIR}${source_file}"
-        if [[ -e "${target_file}" ]]; then
-            echo "- ${source_file}" >> "${REPORT_FILE}"
-        fi
-    done
-    
-    cat >> "${REPORT_FILE}" << EOF
 
----
-
-## Instrukcje przywracania:
-
-Aby przywrócić pojedynczy plik:
-\`\`\`bash
-git checkout ${TAG_NAME} -- gold_image_v1.0/ścieżka/do/pliku
-\`\`\`
-
-Przykład dla nginx.conf:
-\`\`\`bash
-git checkout ${TAG_NAME} -- gold_image_v1.0/etc/nginx/nginx.conf
-\`\`\`
-
----
-
-**Uwaga:** Ten raport zostanie zaktualizowany o finalny hash commita po tagowaniu.
-EOF
-    
-    log_info "Utworzono wstępny raport: ${REPORT_FILE}"
-}
-
-# --- OPERACJE GIT (pkt 3.6) - 100% FINALNA ---
-perform_git_operations() {
-    log_info "Rozpoczynanie operacji Git..."
-    
-    cd "${REPO_ROOT}" > /dev/null 2>&1
-    
-    # 1. Dodanie plików
-    git add .
-    
-    # 2. Commit
-    git commit -m "${COMMIT_MSG}"
-    
-    # 3. Pobranie hasha
-    local commit_hash=$(git rev-parse HEAD)
-    
-    # 4. Log commita (WYRAŹNIE na stderr, nie miesza się z stdout)
-    echo "[INFO] ${CURRENT_DATE} - Utworzono commit: ${commit_hash}" >&2
-    
-    # 5. Obsługa taga
-    if check_existing_tag; then
-        log_warning "Tag ${TAG_NAME} już istnieje - pomijam tworzenie taga."
-    else
-        git tag "${TAG_NAME}"
-        log_info "Utworzono lokalny tag: ${TAG_NAME}"
-        git push origin "${TAG_NAME}"
-        log_info "Wypchnięto tag do zdalnego repozytorium."
-    fi
-    
-    # 6. Zwrócenie CZYSTEGO hasha (tylko hash)
-    echo "${commit_hash}"
-}
-
-# --- AKTUALIZACJA RAPORTU (pkt 3.8) ---
-update_report_with_final_hash() {
-    local final_hash="$1"
-    
-    log_info "Aktualizowanie raportu o finalny hash..."
-    
-    # Użycie awk - zmienia tylko PIERWSZE wystąpienie
-    awk -v hash="${final_hash}" '
-    /\*\*Commit hash:\*\* \[PENDING/ && !found {
-        sub(/\[PENDING - zostanie uzupełniony po commicie\]/, hash)
-        found=1
-    }
-    {print}
-    ' "${REPORT_FILE}" > "${REPORT_FILE}.tmp" && mv "${REPORT_FILE}.tmp" "${REPORT_FILE}"
-    
-    # Dodanie linku do GitHub
-    cat >> "${REPORT_FILE}" << EOF
-
----
-
-## Link do repozytorium:
-
-\`\`\`
-https://github.com/Lisek999/ai-firma-vps/releases/tag/${TAG_NAME}
-\`\`\`
-
-**Finalny hash commita:** \`${final_hash}\`
-EOF
-    
-    # Commit i push
-    git add "${REPORT_FILE}"
-    git commit -m "${UPDATE_MSG}"
-    git push origin main
-    
-    log_info "Zaktualizowano raport i wypchnięto zmiany."
-}
-
-# --- PODSUMOWANIE (pkt 3.9) ---
-print_summary() {
-    local final_hash="$1"
-    local copied_count=0
-    
-    for source_file in "${FILES_TO_BACKUP[@]}"; do
-        local target_file="${BACKUP_DIR}${source_file}"
-        if [[ -e "${target_file}" ]]; then
-            ((copied_count++))
-        fi
-    done
-    
-    echo ""
-    echo "================================================"
-    echo "🎉 GOLD IMAGE v1.0-stable UTWORZONY POMYŚLNIE!"
-    echo "================================================"
-    echo ""
-    echo "📊 PODSUMOWANIE:"
-    echo "   • Skopiowanych plików: ${copied_count}"
-    echo "   • Tag: ${TAG_NAME}"
-    echo "   • Hash commita: ${final_hash}"
-    echo "   • Katalog backup: ${BACKUP_DIR}"
-    echo "   • Raport: ${REPORT_FILE}"
-    echo ""
-    echo "🔗 LINK DO ZDALNEGO REPOZYTORIUM:"
-    echo "   https://github.com/Lisek999/ai-firma-vps/releases/tag/${TAG_NAME}"
-    echo ""
-    echo "✅ WERYFIKACJA:"
-    echo "   1. git tag -l | grep v1.0-stable"
-    echo "   2. Sprawdź tag na GitHubie"
-    echo "   3. cat GOLD_IMAGE_v1.0.md"
-    echo "================================================"
-}
-
-# --- GŁÓWNA FUNKCJA WYKONAWCZA ---
-main() {
-    log_info "Rozpoczynanie tworzenia Gold Image v1.0-stable..."
-    log_info "Repozytorium: ${REPO_ROOT}"
-    
-    validate_git_status
-    prepare_backup_directory
-    copy_files_to_backup
-    create_initial_report
-    final_hash=$(perform_git_operations)
-    update_report_with_final_hash "${final_hash}"
-    print_summary "${final_hash}"
-    
-    log_info "Gold Image creation completed successfully!"
-}
-
-# --- URUCHOMIENIE ---
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main
-fi
+echo "Skrypt został zapisany jako /tmp/add_gold_image_endpoint.py"
+echo ""
+echo "KROKI DO WYKONANIA:"
+echo "1. Uruchom skrypt: python3 /tmp/add_gold_image_endpoint.py"
+echo "2. Jeśli pojawi się błąd 'Nie znaleziono sekcji API', podręczna ścieżka do app.py"
+echo "3. Po sukcesie: sudo supervisorctl restart ai-firma-dashboard"
+echo "4. Sprawdź logi: sudo supervisorctl tail -f ai-firma-dashboard"
+echo ""
+echo "Czy przechodzimy do wykonania tych kroków?"
