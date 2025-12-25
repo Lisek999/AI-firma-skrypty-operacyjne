@@ -1,13 +1,10 @@
 #!/bin/bash
 
 # ============================================================================
-# create_gold_image.sh - DEFINITYWNA WERSJA FINALNA (OSTATECZNA)
+# create_gold_image.sh - WERSJA 100% FINALNA
 # Gold Image Creator - Faza 1 Stabilna
 # 
-# OSTATECZNE POPRAWKI:
-# 1. awk zamiast sed - zmienia tylko pierwsze wystąpienie
-# 2. Logi przed pobraniem hasha - czysty output
-# 3. Pełna obsługa istniejącego taga
+# OSTATECZNA POPRAWKA: Log commita na stderr dla czystego outputu
 # ============================================================================
 
 # --- KONFIGURACJA ---
@@ -180,7 +177,7 @@ EOF
     log_info "Utworzono wstępny raport: ${REPORT_FILE}"
 }
 
-# --- OPERACJE GIT (pkt 3.6) - WYPERFEKCJONOWANA ---
+# --- OPERACJE GIT (pkt 3.6) - 100% FINALNA ---
 perform_git_operations() {
     log_info "Rozpoczynanie operacji Git..."
     
@@ -192,11 +189,11 @@ perform_git_operations() {
     # 2. Commit
     git commit -m "${COMMIT_MSG}"
     
-    # 3. Pobranie hasha (BEZ LOGÓW MIĘDZY)
+    # 3. Pobranie hasha
     local commit_hash=$(git rev-parse HEAD)
     
-    # 4. Log info o commicie (PO pobraniu hasha)
-    log_info "Utworzono commit: ${commit_hash}"
+    # 4. Log commita (WYRAŹNIE na stderr, nie miesza się z stdout)
+    echo "[INFO] ${CURRENT_DATE} - Utworzono commit: ${commit_hash}" >&2
     
     # 5. Obsługa taga
     if check_existing_tag; then
@@ -208,17 +205,17 @@ perform_git_operations() {
         log_info "Wypchnięto tag do zdalnego repozytorium."
     fi
     
-    # 6. Zwrócenie CZYSTEGO hasha
+    # 6. Zwrócenie CZYSTEGO hasha (tylko hash)
     echo "${commit_hash}"
 }
 
-# --- AKTUALIZACJA RAPORTU (pkt 3.8) - WYPERFEKCJONOWANA ---
+# --- AKTUALIZACJA RAPORTU (pkt 3.8) ---
 update_report_with_final_hash() {
     local final_hash="$1"
     
     log_info "Aktualizowanie raportu o finalny hash..."
     
-    # Użycie awk zamiast sed - zmienia tylko PIERWSZE wystąpienie
+    # Użycie awk - zmienia tylko PIERWSZE wystąpienie
     awk -v hash="${final_hash}" '
     /\*\*Commit hash:\*\* \[PENDING/ && !found {
         sub(/\[PENDING - zostanie uzupełniony po commicie\]/, hash)
