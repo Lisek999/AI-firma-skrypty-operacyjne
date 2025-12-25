@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # ============================================================================
-# create_gold_image.sh - FINALNA POPRAWIONA WERSJA
+# create_gold_image.sh - WYPERFEKCJONOWANA WERSJA FINALNA
 # Gold Image Creator - Faza 1 Stabilna
 # 
-# POPRAWKI:
-# 1. Usunięto `set -e` - nie przerywa przy drobnych błędach
-# 2. Lepsza obsługa błędów kopiowania
-# 3. Ignorowanie gold_image_v1.0/ w walidacji Git
+# POPRAWKI FINALNE:
+# 1. Naprawiony błąd sed z datą
+# 2. Sprawdzenie czy tag już istnieje
+# 3. Naprawione formatowanie outputu
 # ============================================================================
 
 # --- KONFIGURACJA ---
@@ -17,6 +17,7 @@ REPORT_FILE="${REPO_ROOT}/GOLD_IMAGE_v1.0.md"
 TAG_NAME="v1.0-stable"
 COMMIT_MSG="Gold Image - Faza 1 Stabilna"
 UPDATE_MSG="Update report with final commit hash"
+CURRENT_DATE=$(date '+%Y-%m-%d %H:%M:%S')
 
 # --- TABLICA PLIKÓW (PRZYKŁADOWA - DO ZASTĄPIENIA RZECZYWISTĄ LISTĄ) ---
 declare -a FILES_TO_BACKUP=(
@@ -28,15 +29,15 @@ declare -a FILES_TO_BACKUP=(
 
 # --- FUNKCJE POMOCNICZE ---
 log_info() {
-    echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') - $1"
+    echo "[INFO] ${CURRENT_DATE} - $1"
 }
 
 log_warning() {
-    echo "[WARNING] $(date '+%Y-%m-%d %H:%M:%S') - $1" >&2
+    echo "[WARNING] ${CURRENT_DATE} - $1" >&2
 }
 
 log_error() {
-    echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') - $1" >&2
+    echo "[ERROR] ${CURRENT_DATE} - $1" >&2
     exit 1
 }
 
@@ -71,6 +72,25 @@ validate_git_status() {
     log_info "Repozytorium Git jest czyste - można kontynuować."
 }
 
+# --- SPRAWDZENIE TAGA (NOWA FUNKCJA) ---
+check_existing_tag() {
+    log_info "Sprawdzanie czy tag ${TAG_NAME} już istnieje..."
+    
+    if git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
+        log_warning "Tag ${TAG_NAME} już istnieje lokalnie!"
+        return 0
+    fi
+    
+    # Sprawdzenie zdalnie
+    if git ls-remote --tags origin "refs/tags/${TAG_NAME}" | grep -q "${TAG_NAME}"; then
+        log_warning "Tag ${TAG_NAME} już istnieje zdalnie!"
+        return 0
+    fi
+    
+    log_info "Tag ${TAG_NAME} nie istnieje - można utworzyć."
+    return 1
+}
+
 # --- PRZYGOTOWANIE KATALOGU (pkt 3.4) ---
 prepare_backup_directory() {
     log_info "Przygotowywanie katalogu backup: ${BACKUP_DIR}"
@@ -86,7 +106,7 @@ prepare_backup_directory() {
     log_info "Utworzono nowy katalog backup."
 }
 
-# --- KOPIOWANIE PLIKÓW (pkt 3.4) - POPRAWIONA ---
+# --- KOPIOWANIE PLIKÓW (pkt 3.4) ---
 copy_files_to_backup() {
     local copied_count=0
     local missing_count=0
@@ -145,7 +165,7 @@ create_initial_report() {
 # GOLD IMAGE - v1.0-stable
 ## Raport wykonania zrzutu systemowego
 
-**Data utworzenia:** $(date '+%Y-%m-%d %H:%M:%S')
+**Data utworzenia:** ${CURRENT_DATE}
 **Tag:** ${TAG_NAME}
 **Commit hash:** [PENDING - zostanie uzupełniony po commicie]
 
@@ -204,15 +224,20 @@ perform_git_operations() {
     local commit_hash=$(git rev-parse HEAD)
     log_info "Utworzono commit: ${commit_hash}"
     
-    # Utworzenie tagu lokalnego
-    git tag "${TAG_NAME}"
-    log_info "Utworzono lokalny tag: ${TAG_NAME}"
+    # Sprawdzenie czy tag już istnieje
+    if check_existing_tag; then
+        log_warning "Tag ${TAG_NAME} już istnieje - pomijam tworzenie taga."
+    else
+        # Utworzenie tagu lokalnego
+        git tag "${TAG_NAME}"
+        log_info "Utworzono lokalny tag: ${TAG_NAME}"
+        
+        # Wypchnięcie tylko taga do zdalnego repozytorium
+        git push origin "${TAG_NAME}"
+        log_info "Wypchnięto tag do zdalnego repozytorium."
+    fi
     
-    # Wypchnięcie tylko taga do zdalnego repozytorium
-    git push origin "${TAG_NAME}"
-    log_info "Wypchnięto tag do zdalnego repozytorium."
-    
-    # Zwrócenie hasha commita
+    # Zwrócenie hasha commita (TYLKO hash, bez logów)
     echo "${commit_hash}"
 }
 
@@ -222,11 +247,8 @@ update_report_with_final_hash() {
     
     log_info "Aktualizowanie raportu o finalny hash..."
     
-    # Aktualizacja hasha w raporcie
-    sed -i "s/Commit hash: \[PENDING.*\]/Commit hash: ${final_hash}/" "${REPORT_FILE}"
-    
-    # Dodanie daty (w razie gdyby heredoc nie zadziałał)
-    sed -i "s/\$(date '+%Y-%m-%d %H:%M:%S')/$(date '+%Y-%m-%d %H:%M:%S')/" "${REPORT_FILE}" 2>/dev/null
+    # Aktualizacja hasha w raporcie (bez problemów z cudzysłowami)
+    sed -i "s|Commit hash: \[PENDING.*\]|Commit hash: ${final_hash}|" "${REPORT_FILE}"
     
     # Dodanie sekcji z linkiem do GitHub
     cat >> "${REPORT_FILE}" << EOF
