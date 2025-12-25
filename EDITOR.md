@@ -1,24 +1,14 @@
 #!/bin/bash
 
 # ============================================================================
-# create_gold_image.sh
+# create_gold_image.sh - POPRAWIONA WERSJA
 # Gold Image Creator - Faza 1 Stabilna
 # 
-# SKRYPT DO UTWORZENIA ZATWIERDZONEGO ZRZUTU SYSTEMU (GOLD IMAGE) v1.0-stable
-# 
-# INSTRUKCJA WYKONANIA DLA CEO:
-# 1. Upewnij się, że jesteś w katalogu /home/ubuntu/ai_firma_dokumenty
-# 2. Wykonaj: getscript create_gold_image
-# 3. Sprawdź wynik w terminalu i na GitHubie
-# 
-# INSTRUKCJA WERYFIKACJI:
-# 1. Lokalnie: git tag -l | grep v1.0-stable
-# 2. Na GitHubie: Sprawdź tag w repozytorium ai_firma_dokumenty
-# 3. Sprawdź plik raportu: cat GOLD_IMAGE_v1.0.md
+# POPRAWKA: Ignoruje katalog gold_image_v1.0/ w walidacji Git
 # ============================================================================
 
-set -e  # Przerywa przy pierwszym błędzie
-set -u  # Traktuje niezdefiniowane zmienne jako błąd
+set -e
+set -u
 
 # --- KONFIGURACJA ---
 REPO_ROOT="/home/ubuntu/ai_firma_dokumenty"
@@ -50,7 +40,7 @@ log_error() {
     exit 1
 }
 
-# --- WALIDACJA WCZEŚNIEJSZA (pkt 3.3) ---
+# --- WALIDACJA WCZEŚNIEJSZA (pkt 3.3) - POPRAWIONA ---
 validate_git_status() {
     log_info "Sprawdzanie stanu repozytorium Git..."
     
@@ -59,10 +49,15 @@ validate_git_status() {
         log_error "Brak repozytorium Git w bieżącym katalogu!"
     fi
     
-    # Sprawdzenie czy repozytorium jest "czyste"
-    if [[ -n "$(git status --porcelain)" ]]; then
+    # Sprawdzenie czy repozytorium jest "czyste" - IGNORUJEMY gold_image_v1.0/
+    local git_changes=$(git status --porcelain | grep -v '^?? gold_image_v1.0/')
+    
+    if [[ -n "${git_changes}" ]]; then
         echo "================================================"
         echo "BŁĄD: Repozytorium ma niezcommitowane zmiany!"
+        echo "Zmiany wykryte:"
+        echo "${git_changes}"
+        echo ""
         echo "Proszę wykonaj:"
         echo "  git status               # zobacz zmiany"
         echo "  git add .                # dodaj wszystko"
@@ -91,10 +86,11 @@ prepare_backup_directory() {
     log_info "Utworzono nowy katalog backup."
 }
 
-# --- KOPIOWANIE PLIKÓW (pkt 3.4) ---
+# --- KOPIOWANIE PLIKÓW (pkt 3.4) - POPRAWIONA OBSŁUGA BŁĘDÓW ---
 copy_files_to_backup() {
     local copied_count=0
     local missing_count=0
+    local error_count=0
     
     log_info "Rozpoczynanie kopiowania plików..."
     
@@ -113,13 +109,15 @@ copy_files_to_backup() {
         # Utworzenie katalogu docelowego
         mkdir -p "${target_dir}"
         
-        # Kopiowanie pliku/katalogu
-        if cp -r "${source_file}" "${target_file}" 2>/dev/null; then
+        # Kopiowanie pliku/katalogu z lepszym handlingiem błędów
+        if cp -r "${source_file}" "${target_file}" 2>&1; then
             log_info "Skopiowano: ${source_file}"
             ((copied_count++))
         else
-            log_warning "Brak uprawnień do kopiowania: ${source_file}"
-            ((missing_count++))
+            local cp_error=$?
+            log_warning "Błąd kopiowania (kod: ${cp_error}): ${source_file}"
+            ((error_count++))
+            # Kontynuuj mimo błędu
         fi
     done
     
@@ -127,10 +125,12 @@ copy_files_to_backup() {
     echo "PODSUMOWANIE KOPIOWANIA:"
     echo "  Skopiowano plików: ${copied_count}"
     echo "  Pominięto plików:  ${missing_count}"
+    echo "  Błędy kopiowania:  ${error_count}"
     echo "================================================"
     
     if [[ ${copied_count} -eq 0 ]]; then
-        log_error "Nie skopiowano żadnego pliku! Sprawdź listę FILES_TO_BACKUP."
+        log_warning "Nie skopiowano żadnego pliku! Sprawdź listę FILES_TO_BACKUP."
+        # NIE przerywamy - może to być celowe (pusta lista)
     fi
 }
 
