@@ -1,188 +1,339 @@
 #!/bin/bash
-# Skrypt: Dodanie endpointu Gold Image do app.py
+# Skrypt: Nowy index.html z panelem Gold Image (uproszczona wersja)
 # Użycie: Skopiuj całą zawartość tego bloku i wklej do EDITOR.md na GitHubie
 
-cat > /tmp/add_gold_image_endpoint.py << 'EOF'
-"""
-Skrypt modyfikacji app.py - dodanie endpointu /api/gold_image/create
-Uruchom: python3 /tmp/add_gold_image_endpoint.py
-"""
+cat > /tmp/simple_gold_frontend.sh << 'EOF'
+#!/bin/bash
+# Backend index.html
+BACKUP_FILE="/opt/ai_firma_dashboard/static/index.html.backup_$(date +%Y%m%d_%H%M%S)"
+INDEX_FILE="/opt/ai_firma_dashboard/static/index.html"
 
-import re
-import sys
-import os
+echo "Tworzenie backupu: $BACKUP_FILE"
+sudo cp "$INDEX_FILE" "$BACKUP_FILE"
 
-def find_api_section(content):
-    """Znajduje sekcję z endpointami API w app.py"""
-    lines = content.split('\n')
-    
-    # Szukamy ostatniego endpointu przed blokiem if __name__ == '__main__'
-    for i, line in enumerate(lines):
-        if line.strip().startswith('@app.route("/api/'):
-            api_start = i
-        if line.strip() == "if __name__ == '__main__':":
-            return api_start, i
-    
-    return None, None
+echo "Tworzenie nowego index.html..."
 
-def insert_endpoint(content):
-    """Wstawia nowy endpoint do app.py"""
-    
-    # Szukamy gdzie wstawić nowy endpoint
-    api_start, api_end = find_api_section(content)
-    
-    if api_start is None:
-        print("ERROR: Nie znaleziono sekcji API w pliku app.py")
-        return None
-    
-    # Nowy endpoint do wstawienia
-    new_endpoint = '''
-@app.route('/api/gold_image/create', methods=['POST'])
-def create_gold_image_endpoint():
-    """Endpoint do tworzenia Gold Image poprzez interfejs dashboardu"""
-    # Weryfikacja nagłówka API Key
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or api_key != os.environ.get('API_KEY'):
-        return jsonify({
-            "success": False,
-            "message": "Brak autoryzacji. Nieprawidłowy lub brakujący token API.",
-            "tag": None,
-            "output": ""
-        }), 401
-    
-    # Pobranie opisu z formularza (tylko do logowania)
-    data = request.get_json()
-    description = data.get('description', '') if data else ''
-    
-    # Logowanie żądania
-    print(f"[GOLD IMAGE] Żądanie utworzenia backupu. Opis: {description[:100]}")
-    
-    # Ścieżka do skryptu (BEZWZGLĘDNA)
-    script_path = "/home/ubuntu/ai_firma_dokumenty/skrypty_operacyjne/create_gold_image.sh"
-    
-    # Sprawdzenie czy skrypt istnieje
-    if not os.path.exists(script_path):
-        return jsonify({
-            "success": False,
-            "message": "Skrypt create_gold_image.sh nie został znaleziony.",
-            "tag": None,
-            "output": f"Ścieżka: {script_path}"
-        }), 500
-    
-    try:
-        # Bezpieczne wywołanie skryptu - NIE przekazujemy danych użytkownika jako argumentów
-        import subprocess
-        import shlex
+sudo cat > "$INDEX_FILE" << 'HTML_EOF'
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Firma - Status Serwera + Gold Image</title>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        body { background: #f5f5f5; margin: 0; padding: 15px; color: #333; }
+        .container { max-width: 800px; margin: 0 auto; }
+        header { text-align: center; margin-bottom: 25px; }
+        h1 { color: #2c3e50; }
+        h2 { color: #34495e; margin-top: 0; }
+        .card { background: white; border-radius: 10px; padding: 20px; margin-bottom: 15px; box-shadow: 0 3px 10px rgba(0,0,0,0.08); }
+        .metric { display: flex; justify-content: space-between; margin: 10px 0; }
+        .metric .value { font-weight: bold; }
+        .status-online { color: #27ae60; }
+        .status-offline { color: #e74c3c; }
+        .service-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+        .service { padding: 10px; border-radius: 6px; background: #ecf0f1; text-align: center; }
         
-        # Użycie Popen z przechwytywaniem outputu
-        process = subprocess.Popen(
-            ['bash', script_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=os.path.dirname(script_path)  # Uruchom w katalogu skryptu
-        )
+        /* Panel Gold Image */
+        .gold-panel { border-left: 4px solid #f39c12; padding-left: 15px; margin-top: 15px; }
+        .btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        .btn:hover { background: #2980b9; }
+        .btn:disabled { background: #95a5a6; cursor: not-allowed; }
+        .btn-success { background: #27ae60; }
+        .btn-success:hover { background: #219653; }
         
-        stdout, stderr = process.communicate(timeout=120)  # Timeout 2 minuty
-        return_code = process.returncode
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            width: 90%;
+            max-width: 500px;
+        }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            min-height: 80px;
+            margin-top: 10px;
+        }
+        .api-key-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-family: monospace;
+            margin-bottom: 15px;
+        }
+        .message {
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 10px;
+            display: none;
+        }
+        .message.success { background: #d5f4e6; border: 1px solid #27ae60; display: block; }
+        .message.error { background: #fadbd8; border: 1px solid #e74c3c; display: block; }
+        .message.info { background: #e8f4fc; border: 1px solid #3498db; display: block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header><h1>🖥️ Status Serwera AI Firma</h1><p>Ostatnia aktualizacja: <span id="updateTime">-</span></p></header>
         
-        # Łączenie outputu
-        full_output = stdout + "\n" + stderr if stderr else stdout
+        <div class="card"><h2>Zdrowie Systemu</h2><div id="healthMetrics"></div></div>
+        <div class="card"><h2>Usługi</h2><div class="service-list" id="serviceList"></div></div>
+        <div class="card"><h2>Zasoby</h2><div id="resourceMetrics"></div></div>
         
-        # Parsowanie tagu z outputu (szukamy wzorca tagu Git)
-        import re
-        tag_match = re.search(r'tag:\s*(v\d+\.\d+[\w\.-]*)', full_output, re.IGNORECASE)
-        tag = tag_match.group(1) if tag_match else None
+        <!-- PANEL GOLD IMAGE -->
+        <div class="card">
+            <h2>🛡️ Zarządzanie Gold Image</h2>
+            <div class="gold-panel">
+                <p><strong>Status:</strong> <span id="goldStatus">Gotowy</span></p>
+                <p><strong>Ostatni backup:</strong> <span id="lastBackup">Nie utworzony</span></p>
+                
+                <div id="authSection" style="display: none;">
+                    <p>Wymagany klucz API:</p>
+                    <input type="password" id="apiKey" class="api-key-input" placeholder="Wklej klucz API...">
+                    <button id="saveKeyBtn" class="btn">Zapisz klucz</button>
+                    <p style="font-size: 12px; color: #7f8c8d;">Klucz zapisze się w przeglądarce</p>
+                </div>
+                
+                <button id="createBtn" class="btn btn-success">Utwórz nowy Gold Image</button>
+                
+                <div id="goldMessage" class="message"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal tworzenia -->
+    <div id="createModal" class="modal-overlay">
+        <div class="modal">
+            <h3>📸 Utwórz Gold Image</h3>
+            <p>Opis (opcjonalnie):</p>
+            <textarea id="description" placeholder="Co zmieniono w systemie..."></textarea>
+            <div class="modal-actions">
+                <button id="cancelBtn" class="btn">Anuluj</button>
+                <button id="executeBtn" class="btn btn-success">Wykonaj</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Zmienne
+        let apiKey = localStorage.getItem('gold_api_key') || '';
         
-        if return_code == 0:
-            return jsonify({
-                "success": True,
-                "message": f"Gold Image utworzony pomyślnie{' (tag: ' + tag + ')' if tag else ''}",
-                "tag": tag,
-                "output": full_output[-2000:]  # Ostatnie 2000 znaków dla bezpieczeństwa
-            }), 200
-        else:
-            return jsonify({
-                "success": False,
-                "message": "Błąd podczas wykonywania skryptu tworzenia Gold Image.",
-                "tag": tag,
-                "output": full_output[-2000:]  # Ostatnie 2000 znaków
-            }), 500
+        // Elementy DOM
+        const goldStatus = document.getElementById('goldStatus');
+        const authSection = document.getElementById('authSection');
+        const createBtn = document.getElementById('createBtn');
+        const goldMessage = document.getElementById('goldMessage');
+        const createModal = document.getElementById('createModal');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const executeBtn = document.getElementById('executeBtn');
+        const apiKeyInput = document.getElementById('apiKey');
+        const saveKeyBtn = document.getElementById('saveKeyBtn');
+        
+        // Inicjalizacja
+        function init() {
+            if (!apiKey) {
+                authSection.style.display = 'block';
+                goldStatus.textContent = 'Wymaga klucza API';
+                goldStatus.className = 'status-offline';
+            } else {
+                authSection.style.display = 'none';
+                goldStatus.textContent = 'Gotowy (klucz zapisany)';
+                goldStatus.className = 'status-online';
+            }
             
-    except subprocess.TimeoutExpired:
-        return jsonify({
-            "success": False,
-            "message": "Timeout: Skrypt wykonuje się zbyt długo (ponad 2 minuty).",
-            "tag": None,
-            "output": "Proces został zabity z powodu przekroczenia czasu."
-        }), 500
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "message": f"Nieoczekiwany błąd: {str(e)}",
-            "tag": None,
-            "output": ""
-        }), 500
-'''
-    
-    # Wstawiamy nowy endpoint przed ostatnim znalezionym endpointem API
-    lines = content.split('\n')
-    
-    # Szukamy ostatniego @app.route przed if __name__
-    insert_position = api_end
-    for i in range(api_end-1, api_start-1, -1):
-        if '@app.route' in lines[i]:
-            insert_position = i + 1  # Wstawiamy po tym endpointie
-            break
-    
-    # Wstawiamy nowy endpoint
-    lines.insert(insert_position, new_endpoint)
-    
-    return '\n'.join(lines)
-
-def main():
-    # Ścieżka do app.py (dostosuj jeśli potrzebne)
-    app_py_path = "/home/ubuntu/ai_firma_dashboard/app.py"
-    
-    if not os.path.exists(app_py_path):
-        print(f"ERROR: Plik {app_py_path} nie istnieje.")
-        print("Podaj poprawną ścieżkę do app.py:")
-        app_py_path = input().strip()
-    
-    # Wczytanie aktualnej zawartości
-    with open(app_py_path, 'r') as f:
-        content = f.read()
-    
-    # Wstawienie nowego endpointu
-    new_content = insert_endpoint(content)
-    
-    if new_content:
-        # Backup oryginalnego pliku
-        backup_path = app_py_path + '.backup_' + datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        import shutil
-        shutil.copy2(app_py_path, backup_path)
-        print(f"Utworzono backup: {backup_path}")
+            // Event listeners
+            createBtn.addEventListener('click', () => {
+                document.getElementById('description').value = '';
+                createModal.style.display = 'flex';
+            });
+            
+            cancelBtn.addEventListener('click', () => {
+                createModal.style.display = 'none';
+            });
+            
+            executeBtn.addEventListener('click', createGoldImage);
+            
+            saveKeyBtn.addEventListener('click', () => {
+                const key = apiKeyInput.value.trim();
+                if (key) {
+                    localStorage.setItem('gold_api_key', key);
+                    apiKey = key;
+                    authSection.style.display = 'none';
+                    goldStatus.textContent = 'Gotowy (klucz zapisany)';
+                    goldStatus.className = 'status-online';
+                    showMessage('Klucz API zapisany.', 'success');
+                }
+            });
+            
+            // Jeśli już mamy klucz, wypełnij pole
+            if (apiKey) {
+                apiKeyInput.value = '••••••••••••••••';
+            }
+        }
         
-        # Zapisanie zmodyfikowanego pliku
-        with open(app_py_path, 'w') as f:
-            f.write(new_content)
+        // Funkcja tworzenia Gold Image
+        async function createGoldImage() {
+            const description = document.getElementById('description').value.trim();
+            
+            // Przygotuj UI
+            executeBtn.disabled = true;
+            executeBtn.textContent = 'Tworzenie...';
+            createBtn.disabled = true;
+            
+            showMessage('⌛ Trwa tworzenie Gold Image... (może potrwać do 2 minut)', 'info');
+            
+            try {
+                const response = await fetch('/api/gold_image/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey || ''
+                    },
+                    body: JSON.stringify({ description })
+                });
+                
+                const data = await response.json();
+                
+                if (response.status === 401) {
+                    // Brak autoryzacji - pokaż sekcję z kluczem
+                    showMessage('❌ Brak autoryzacji. Wprowadź klucz API powyżej.', 'error');
+                    authSection.style.display = 'block';
+                    goldStatus.textContent = 'Wymaga klucza API';
+                    goldStatus.className = 'status-offline';
+                } else if (data.success) {
+                    showMessage(`✅ ${data.message}${data.tag ? ' (Tag: ' + data.tag + ')' : ''}`, 'success');
+                    if (data.tag) {
+                        document.getElementById('lastBackup').textContent = data.tag;
+                    }
+                } else {
+                    showMessage(`❌ ${data.message}`, 'error');
+                }
+            } catch (error) {
+                showMessage(`❌ Błąd: ${error.message}`, 'error');
+            } finally {
+                // Przywróć UI
+                executeBtn.disabled = false;
+                executeBtn.textContent = 'Wykonaj';
+                createBtn.disabled = false;
+                createModal.style.display = 'none';
+            }
+        }
         
-        print("✓ Endpoint /api/gold_image/create został dodany do app.py")
-        print("✓ Restart serwisu Flask wymagany: sudo supervisorctl restart ai-firma-dashboard")
-    else:
-        print("✗ Nie udało się dodać endpointu")
+        // Pomocnicza funkcja do komunikatów
+        function showMessage(text, type) {
+            goldMessage.textContent = text;
+            goldMessage.className = `message ${type}`;
+            goldMessage.style.display = 'block';
+            
+            // Auto-ukrywanie po 10s dla sukcesu
+            if (type === 'success') {
+                setTimeout(() => {
+                    goldMessage.style.display = 'none';
+                }, 10000);
+            }
+        }
+        
+        // Oryginalne funkcje dashboardu
+        async function loadData() {
+            try {
+                const resp = await fetch('/api/health');
+                const data = await resp.json();
+                document.getElementById('updateTime').textContent = new Date().toLocaleTimeString();
+                renderHealth(data);
+                renderServices(data.services);
+                renderResources(data.memory, data.disk, data.system);
+            } catch (err) {
+                document.getElementById('healthMetrics').innerHTML = `<p style="color:red;">Błąd ładowania: ${err}</p>`;
+            }
+        }
+        
+        function renderHealth(data) {
+            const el = document.getElementById('healthMetrics');
+            el.innerHTML = `
+                <div class="metric"><span>Status:</span><span class="value status-online">${data.status.toUpperCase()}</span></div>
+                <div class="metric"><span>Uptime:</span><span class="value">${data.system.uptime}</span></div>
+                <div class="metric"><span>Load Avg:</span><span class="value">${data.system.load_avg.join(', ')}</span></div>
+                <div class="metric"><span>CPU:</span><span class="value">${data.system.cpu_percent}%</span></div>
+            `;
+        }
+        
+        function renderServices(services) {
+            const el = document.getElementById('serviceList');
+            el.innerHTML = Object.entries(services).map(([name, isUp]) => `
+                <div class="service">
+                    <strong>${name}</strong><br>
+                    <span class="${isUp ? 'status-online' : 'status-offline'}">${isUp ? '✅ Aktywna' : '❌ Nieaktywna'}</span>
+                </div>
+            `).join('');
+        }
+        
+        function renderResources(mem, disk, sys) {
+            const el = document.getElementById('resourceMetrics');
+            el.innerHTML = `
+                <div class="metric"><span>Pamięć RAM:</span><span class="value">${mem.percent_used}% (${mem.available_gb} GB wolne)</span></div>
+                <div class="metric"><span>Dysk (/) :</span><span class="value">${disk.percent_used}% (${disk.free_gb} GB wolne)</span></div>
+            `;
+        }
+        
+        // Start
+        document.addEventListener('DOMContentLoaded', () => {
+            init();
+            loadData();
+            setInterval(loadData, 10000);
+        });
+    </script>
+</body>
+</html>
+HTML_EOF
 
-if __name__ == '__main__':
-    import datetime
-    main()
+# Ustaw poprawne uprawnienia
+sudo chown www-data:www-data "$INDEX_FILE"
+sudo chmod 644 "$INDEX_FILE"
+
+echo "✓ Nowy index.html został zainstalowany"
+echo "✓ Otwórz dashboard: http://57.128.247.215"
+echo "✓ Jeśli nie masz klucza API, wykonaj: echo \$API_KEY"
+echo ""
+echo "Czy przechodzimy do wykonania tego skryptu?"
 EOF
 
-echo "Skrypt został zapisany jako /tmp/add_gold_image_endpoint.py"
+# Nadaj uprawnienia i pokaż instrukcję
+chmod +x /tmp/simple_gold_frontend.sh
+echo "========================================================"
+echo "GOTOWY SKRYPT DO WYKONANIA:"
+echo "========================================================"
+echo "1. Pobierz skrypt przez getscript:"
+echo "   getscript gold_ui_simple"
 echo ""
-echo "KROKI DO WYKONANIA:"
-echo "1. Uruchom skrypt: python3 /tmp/add_gold_image_endpoint.py"
-echo "2. Jeśli pojawi się błąd 'Nie znaleziono sekcji API', podręczna ścieżka do app.py"
-echo "3. Po sukcesie: sudo supervisorctl restart ai-firma-dashboard"
-echo "4. Sprawdź logi: sudo supervisorctl tail -f ai-firma-dashboard"
+echo "2. Uruchom pobrany skrypt:"
+echo "   ~/skrypty/gold_ui_simple.sh"
 echo ""
-echo "Czy przechodzimy do wykonania tych kroków?"
+echo "3. Otwórz dashboard i przetestuj:"
+echo "   http://57.128.247.215"
+echo ""
+echo "Czy wykonujemy te kroki?"
