@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # ============================================================================
-# create_gold_image.sh - POPRAWIONA WERSJA
+# create_gold_image.sh - FINALNA POPRAWIONA WERSJA
 # Gold Image Creator - Faza 1 Stabilna
 # 
-# POPRAWKA: Ignoruje katalog gold_image_v1.0/ w walidacji Git
+# POPRAWKI:
+# 1. Usunięto `set -e` - nie przerywa przy drobnych błędach
+# 2. Lepsza obsługa błędów kopiowania
+# 3. Ignorowanie gold_image_v1.0/ w walidacji Git
 # ============================================================================
-
-set -e
-set -u
 
 # --- KONFIGURACJA ---
 REPO_ROOT="/home/ubuntu/ai_firma_dokumenty"
@@ -18,7 +18,7 @@ TAG_NAME="v1.0-stable"
 COMMIT_MSG="Gold Image - Faza 1 Stabilna"
 UPDATE_MSG="Update report with final commit hash"
 
-# --- PRZYKŁADOWA TABLICA PLIKÓW (DO ZASTĄPIENIA LISTĄ Z BRIEFU) ---
+# --- TABLICA PLIKÓW (PRZYKŁADOWA - DO ZASTĄPIENIA RZECZYWISTĄ LISTĄ) ---
 declare -a FILES_TO_BACKUP=(
     "/etc/nginx/nginx.conf"
     "/home/ubuntu/.bashrc"
@@ -40,7 +40,7 @@ log_error() {
     exit 1
 }
 
-# --- WALIDACJA WCZEŚNIEJSZA (pkt 3.3) - POPRAWIONA ---
+# --- WALIDACJA WCZEŚNIEJSZA (pkt 3.3) ---
 validate_git_status() {
     log_info "Sprawdzanie stanu repozytorium Git..."
     
@@ -86,18 +86,19 @@ prepare_backup_directory() {
     log_info "Utworzono nowy katalog backup."
 }
 
-# --- KOPIOWANIE PLIKÓW (pkt 3.4) - POPRAWIONA OBSŁUGA BŁĘDÓW ---
+# --- KOPIOWANIE PLIKÓW (pkt 3.4) - POPRAWIONA ---
 copy_files_to_backup() {
     local copied_count=0
     local missing_count=0
     local error_count=0
     
     log_info "Rozpoczynanie kopiowania plików..."
+    echo "================================================"
     
     for source_file in "${FILES_TO_BACKUP[@]}"; do
         # Sprawdzenie czy plik istnieje
         if [[ ! -f "${source_file}" ]] && [[ ! -d "${source_file}" ]]; then
-            log_warning "Plik nie istnieje, pomijam: ${source_file}"
+            log_warning "❌ Plik nie istnieje: ${source_file}"
             ((missing_count++))
             continue
         fi
@@ -109,28 +110,30 @@ copy_files_to_backup() {
         # Utworzenie katalogu docelowego
         mkdir -p "${target_dir}"
         
-        # Kopiowanie pliku/katalogu z lepszym handlingiem błędów
-        if cp -r "${source_file}" "${target_file}" 2>&1; then
-            log_info "Skopiowano: ${source_file}"
+        # Kopiowanie pliku/katalogu
+        if cp -r "${source_file}" "${target_file}" 2>/tmp/cp_error.$$; then
+            log_info "✅ Skopiowano: ${source_file}"
             ((copied_count++))
         else
-            local cp_error=$?
-            log_warning "Błąd kopiowania (kod: ${cp_error}): ${source_file}"
+            log_warning "⚠️  Błąd kopiowania: ${source_file}"
+            cat /tmp/cp_error.$$ >&2
             ((error_count++))
-            # Kontynuuj mimo błędu
         fi
+        
+        # Usunięcie pliku z błędami
+        rm -f /tmp/cp_error.$$
     done
     
     echo "================================================"
-    echo "PODSUMOWANIE KOPIOWANIA:"
-    echo "  Skopiowano plików: ${copied_count}"
-    echo "  Pominięto plików:  ${missing_count}"
-    echo "  Błędy kopiowania:  ${error_count}"
+    echo "📊 PODSUMOWANIE KOPIOWANIA:"
+    echo "   ✅ Skopiowano plików: ${copied_count}"
+    echo "   ⚠️  Pominięto plików: ${missing_count}"
+    echo "   ❌ Błędy kopiowania: ${error_count}"
     echo "================================================"
     
-    if [[ ${copied_count} -eq 0 ]]; then
+    if [[ ${copied_count} -eq 0 ]] && [[ ${#FILES_TO_BACKUP[@]} -gt 0 ]]; then
         log_warning "Nie skopiowano żadnego pliku! Sprawdź listę FILES_TO_BACKUP."
-        # NIE przerywamy - może to być celowe (pusta lista)
+        # NIE przerywamy - kontynuujemy z raportem
     fi
 }
 
@@ -222,6 +225,9 @@ update_report_with_final_hash() {
     # Aktualizacja hasha w raporcie
     sed -i "s/Commit hash: \[PENDING.*\]/Commit hash: ${final_hash}/" "${REPORT_FILE}"
     
+    # Dodanie daty (w razie gdyby heredoc nie zadziałał)
+    sed -i "s/\$(date '+%Y-%m-%d %H:%M:%S')/$(date '+%Y-%m-%d %H:%M:%S')/" "${REPORT_FILE}" 2>/dev/null
+    
     # Dodanie sekcji z linkiem do GitHub
     cat >> "${REPORT_FILE}" << EOF
 
@@ -230,7 +236,7 @@ update_report_with_final_hash() {
 ## Link do repozytorium:
 
 \`\`\`
-https://github.com/[twoja_nazwa_użytkownika]/ai_firma_dokumenty/releases/tag/${TAG_NAME}
+https://github.com/Lisek999/ai-firma-vps/releases/tag/${TAG_NAME}
 \`\`\`
 
 **Finalny hash commita:** \`${final_hash}\`
@@ -272,7 +278,7 @@ print_summary() {
     echo "   • Raport: ${REPORT_FILE}"
     echo ""
     echo "🔗 LINK DO ZDALNEGO REPOZYTORIUM:"
-    echo "   https://github.com/[twoja_nazwa_użytkownika]/ai_firma_dokumenty/releases/tag/${TAG_NAME}"
+    echo "   https://github.com/Lisek999/ai-firma-vps/releases/tag/${TAG_NAME}"
     echo ""
     echo "✅ WERYFIKACJA:"
     echo "   1. git tag -l | grep v1.0-stable"
