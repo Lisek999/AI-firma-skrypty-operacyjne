@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # ============================================================================
-# create_gold_image.sh - WYPERFEKCJONOWANA WERSJA FINALNA
+# create_gold_image.sh - DEFINITYWNA WERSJA FINALNA
 # Gold Image Creator - Faza 1 Stabilna
 # 
-# POPRAWKI FINALNE:
-# 1. Naprawiony błąd sed z datą
-# 2. Sprawdzenie czy tag już istnieje
-# 3. Naprawione formatowanie outputu
+# OSTATECZNE POPRAWKI:
+# 1. Naprawiony sed - szuka "**Commit hash:**" z gwiazdkami
+# 2. Tag nie jest tworzony jeśli już istnieje (funkcja zwraca wcześniej)
+# 3. Funkcja perform_git_operations zwraca TYLKO hash
 # ============================================================================
 
 # --- KONFIGURACJA ---
@@ -72,23 +72,21 @@ validate_git_status() {
     log_info "Repozytorium Git jest czyste - można kontynuować."
 }
 
-# --- SPRAWDZENIE TAGA (NOWA FUNKCJA) ---
+# --- SPRAWDZENIE TAGA (POPRAWIONA) ---
 check_existing_tag() {
-    log_info "Sprawdzanie czy tag ${TAG_NAME} już istnieje..."
-    
+    # Sprawdzenie lokalnie
     if git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
         log_warning "Tag ${TAG_NAME} już istnieje lokalnie!"
-        return 0
+        return 0  # true - tag istnieje
     fi
     
     # Sprawdzenie zdalnie
     if git ls-remote --tags origin "refs/tags/${TAG_NAME}" | grep -q "${TAG_NAME}"; then
         log_warning "Tag ${TAG_NAME} już istnieje zdalnie!"
-        return 0
+        return 0  # true - tag istnieje
     fi
     
-    log_info "Tag ${TAG_NAME} nie istnieje - można utworzyć."
-    return 1
+    return 1  # false - tag nie istnieje
 }
 
 # --- PRZYGOTOWANIE KATALOGU (pkt 3.4) ---
@@ -207,12 +205,12 @@ EOF
     log_info "Utworzono wstępny raport: ${REPORT_FILE}"
 }
 
-# --- OPERACJE GIT (pkt 3.6) ---
+# --- OPERACJE GIT (pkt 3.6) - POPRAWIONA ---
 perform_git_operations() {
     log_info "Rozpoczynanie operacji Git..."
     
     # Przejście do katalogu repozytorium
-    cd "${REPO_ROOT}"
+    cd "${REPO_ROOT}" > /dev/null 2>&1
     
     # Dodanie wszystkich nowych plików
     git add .
@@ -220,7 +218,7 @@ perform_git_operations() {
     # Commit z wiadomością
     git commit -m "${COMMIT_MSG}"
     
-    # Pobranie hasha commita
+    # Pobranie hasha commita (BEZ LOGÓW)
     local commit_hash=$(git rev-parse HEAD)
     log_info "Utworzono commit: ${commit_hash}"
     
@@ -237,18 +235,18 @@ perform_git_operations() {
         log_info "Wypchnięto tag do zdalnego repozytorium."
     fi
     
-    # Zwrócenie hasha commita (TYLKO hash, bez logów)
-    echo "${commit_hash}"
+    # Zwrócenie hasha commita (TYLKO hash, bez dodatkowych echo)
+    echo -n "${commit_hash}"
 }
 
-# --- AKTUALIZACJA RAPORTU (pkt 3.8) ---
+# --- AKTUALIZACJA RAPORTU (pkt 3.8) - POPRAWIONA ---
 update_report_with_final_hash() {
     local final_hash="$1"
     
     log_info "Aktualizowanie raportu o finalny hash..."
     
-    # Aktualizacja hasha w raporcie (bez problemów z cudzysłowami)
-    sed -i "s|Commit hash: \[PENDING.*\]|Commit hash: ${final_hash}|" "${REPORT_FILE}"
+    # Aktualizacja hasha w raporcie (szukamy **Commit hash:**)
+    sed -i "s|\*\*Commit hash:\*\* \[PENDING.*\]|\*\*Commit hash:\*\* ${final_hash}|" "${REPORT_FILE}"
     
     # Dodanie sekcji z linkiem do GitHub
     cat >> "${REPORT_FILE}" << EOF
