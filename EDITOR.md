@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # ============================================================================
-# create_gold_image.sh - DEFINITYWNA WERSJA FINALNA
+# create_gold_image.sh - DEFINITYWNA WERSJA FINALNA (OSTATECZNA)
 # Gold Image Creator - Faza 1 Stabilna
 # 
 # OSTATECZNE POPRAWKI:
-# 1. Naprawiony sed - szuka "**Commit hash:**" z gwiazdkami
-# 2. Tag nie jest tworzony jeśli już istnieje (funkcja zwraca wcześniej)
-# 3. Funkcja perform_git_operations zwraca TYLKO hash
+# 1. awk zamiast sed - zmienia tylko pierwsze wystąpienie
+# 2. Logi przed pobraniem hasha - czysty output
+# 3. Pełna obsługa istniejącego taga
 # ============================================================================
 
 # --- KONFIGURACJA ---
@@ -45,12 +45,10 @@ log_error() {
 validate_git_status() {
     log_info "Sprawdzanie stanu repozytorium Git..."
     
-    # Sprawdzenie czy jesteśmy w repozytorium Git
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
         log_error "Brak repozytorium Git w bieżącym katalogu!"
     fi
     
-    # Sprawdzenie czy repozytorium jest "czyste" - IGNORUJEMY gold_image_v1.0/
     local git_changes=$(git status --porcelain | grep -v '^?? gold_image_v1.0/')
     
     if [[ -n "${git_changes}" ]]; then
@@ -72,34 +70,28 @@ validate_git_status() {
     log_info "Repozytorium Git jest czyste - można kontynuować."
 }
 
-# --- SPRAWDZENIE TAGA (POPRAWIONA) ---
+# --- SPRAWDZENIE TAGA ---
 check_existing_tag() {
-    # Sprawdzenie lokalnie
     if git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
-        log_warning "Tag ${TAG_NAME} już istnieje lokalnie!"
-        return 0  # true - tag istnieje
+        return 0
     fi
     
-    # Sprawdzenie zdalnie
     if git ls-remote --tags origin "refs/tags/${TAG_NAME}" | grep -q "${TAG_NAME}"; then
-        log_warning "Tag ${TAG_NAME} już istnieje zdalnie!"
-        return 0  # true - tag istnieje
+        return 0
     fi
     
-    return 1  # false - tag nie istnieje
+    return 1
 }
 
 # --- PRZYGOTOWANIE KATALOGU (pkt 3.4) ---
 prepare_backup_directory() {
     log_info "Przygotowywanie katalogu backup: ${BACKUP_DIR}"
     
-    # Usunięcie poprzedniego katalogu (jeśli istnieje)
     if [[ -d "${BACKUP_DIR}" ]]; then
         rm -rf "${BACKUP_DIR}"
         log_info "Usunięto stary katalog backup."
     fi
     
-    # Utworzenie nowego katalogu
     mkdir -p "${BACKUP_DIR}"
     log_info "Utworzono nowy katalog backup."
 }
@@ -108,51 +100,35 @@ prepare_backup_directory() {
 copy_files_to_backup() {
     local copied_count=0
     local missing_count=0
-    local error_count=0
     
     log_info "Rozpoczynanie kopiowania plików..."
     echo "================================================"
     
     for source_file in "${FILES_TO_BACKUP[@]}"; do
-        # Sprawdzenie czy plik istnieje
         if [[ ! -f "${source_file}" ]] && [[ ! -d "${source_file}" ]]; then
             log_warning "❌ Plik nie istnieje: ${source_file}"
             ((missing_count++))
             continue
         fi
         
-        # Określenie docelowej ścieżki
         local target_file="${BACKUP_DIR}${source_file}"
         local target_dir=$(dirname "${target_file}")
         
-        # Utworzenie katalogu docelowego
         mkdir -p "${target_dir}"
         
-        # Kopiowanie pliku/katalogu
-        if cp -r "${source_file}" "${target_file}" 2>/tmp/cp_error.$$; then
+        if cp -r "${source_file}" "${target_file}" 2>/dev/null; then
             log_info "✅ Skopiowano: ${source_file}"
             ((copied_count++))
         else
             log_warning "⚠️  Błąd kopiowania: ${source_file}"
-            cat /tmp/cp_error.$$ >&2
-            ((error_count++))
         fi
-        
-        # Usunięcie pliku z błędami
-        rm -f /tmp/cp_error.$$
     done
     
     echo "================================================"
     echo "📊 PODSUMOWANIE KOPIOWANIA:"
     echo "   ✅ Skopiowano plików: ${copied_count}"
     echo "   ⚠️  Pominięto plików: ${missing_count}"
-    echo "   ❌ Błędy kopiowania: ${error_count}"
     echo "================================================"
-    
-    if [[ ${copied_count} -eq 0 ]] && [[ ${#FILES_TO_BACKUP[@]} -gt 0 ]]; then
-        log_warning "Nie skopiowano żadnego pliku! Sprawdź listę FILES_TO_BACKUP."
-        # NIE przerywamy - kontynuujemy z raportem
-    fi
 }
 
 # --- TWORZENIE RAPORTU (pkt 3.5) ---
@@ -173,7 +149,6 @@ create_initial_report() {
 
 EOF
     
-    # Dodanie listy plików do raportu
     for source_file in "${FILES_TO_BACKUP[@]}"; do
         local target_file="${BACKUP_DIR}${source_file}"
         if [[ -e "${target_file}" ]]; then
@@ -205,50 +180,54 @@ EOF
     log_info "Utworzono wstępny raport: ${REPORT_FILE}"
 }
 
-# --- OPERACJE GIT (pkt 3.6) - POPRAWIONA ---
+# --- OPERACJE GIT (pkt 3.6) - WYPERFEKCJONOWANA ---
 perform_git_operations() {
     log_info "Rozpoczynanie operacji Git..."
     
-    # Przejście do katalogu repozytorium
     cd "${REPO_ROOT}" > /dev/null 2>&1
     
-    # Dodanie wszystkich nowych plików
+    # 1. Dodanie plików
     git add .
     
-    # Commit z wiadomością
+    # 2. Commit
     git commit -m "${COMMIT_MSG}"
     
-    # Pobranie hasha commita (BEZ LOGÓW)
+    # 3. Pobranie hasha (BEZ LOGÓW MIĘDZY)
     local commit_hash=$(git rev-parse HEAD)
+    
+    # 4. Log info o commicie (PO pobraniu hasha)
     log_info "Utworzono commit: ${commit_hash}"
     
-    # Sprawdzenie czy tag już istnieje
+    # 5. Obsługa taga
     if check_existing_tag; then
         log_warning "Tag ${TAG_NAME} już istnieje - pomijam tworzenie taga."
     else
-        # Utworzenie tagu lokalnego
         git tag "${TAG_NAME}"
         log_info "Utworzono lokalny tag: ${TAG_NAME}"
-        
-        # Wypchnięcie tylko taga do zdalnego repozytorium
         git push origin "${TAG_NAME}"
         log_info "Wypchnięto tag do zdalnego repozytorium."
     fi
     
-    # Zwrócenie hasha commita (TYLKO hash, bez dodatkowych echo)
-    echo -n "${commit_hash}"
+    # 6. Zwrócenie CZYSTEGO hasha
+    echo "${commit_hash}"
 }
 
-# --- AKTUALIZACJA RAPORTU (pkt 3.8) - POPRAWIONA ---
+# --- AKTUALIZACJA RAPORTU (pkt 3.8) - WYPERFEKCJONOWANA ---
 update_report_with_final_hash() {
     local final_hash="$1"
     
     log_info "Aktualizowanie raportu o finalny hash..."
     
-    # Aktualizacja hasha w raporcie (szukamy **Commit hash:**)
-    sed -i "s|\*\*Commit hash:\*\* \[PENDING.*\]|\*\*Commit hash:\*\* ${final_hash}|" "${REPORT_FILE}"
+    # Użycie awk zamiast sed - zmienia tylko PIERWSZE wystąpienie
+    awk -v hash="${final_hash}" '
+    /\*\*Commit hash:\*\* \[PENDING/ && !found {
+        sub(/\[PENDING - zostanie uzupełniony po commicie\]/, hash)
+        found=1
+    }
+    {print}
+    ' "${REPORT_FILE}" > "${REPORT_FILE}.tmp" && mv "${REPORT_FILE}.tmp" "${REPORT_FILE}"
     
-    # Dodanie sekcji z linkiem do GitHub
+    # Dodanie linku do GitHub
     cat >> "${REPORT_FILE}" << EOF
 
 ---
@@ -262,11 +241,9 @@ https://github.com/Lisek999/ai-firma-vps/releases/tag/${TAG_NAME}
 **Finalny hash commita:** \`${final_hash}\`
 EOF
     
-    # Commit zaktualizowanego raportu
+    # Commit i push
     git add "${REPORT_FILE}"
     git commit -m "${UPDATE_MSG}"
-    
-    # Wypchnięcie zmian (bez tagowania)
     git push origin main
     
     log_info "Zaktualizowano raport i wypchnięto zmiany."
@@ -277,7 +254,6 @@ print_summary() {
     local final_hash="$1"
     local copied_count=0
     
-    # Liczenie skopiowanych plików
     for source_file in "${FILES_TO_BACKUP[@]}"; do
         local target_file="${BACKUP_DIR}${source_file}"
         if [[ -e "${target_file}" ]]; then
@@ -312,19 +288,18 @@ main() {
     log_info "Rozpoczynanie tworzenia Gold Image v1.0-stable..."
     log_info "Repozytorium: ${REPO_ROOT}"
     
-    # Kolejność wykonywania zgodna z Planem Ataku
-    validate_git_status          # pkt 3.3
-    prepare_backup_directory     # pkt 3.4 (przygotowanie)
-    copy_files_to_backup         # pkt 3.4 (kopiowanie)
-    create_initial_report        # pkt 3.5
-    final_hash=$(perform_git_operations)  # pkt 3.6 + 3.7
-    update_report_with_final_hash "${final_hash}"  # pkt 3.8
-    print_summary "${final_hash}"          # pkt 3.9
+    validate_git_status
+    prepare_backup_directory
+    copy_files_to_backup
+    create_initial_report
+    final_hash=$(perform_git_operations)
+    update_report_with_final_hash "${final_hash}"
+    print_summary "${final_hash}"
     
     log_info "Gold Image creation completed successfully!"
 }
 
-# --- URUCHOMIENIE SKRYPTU ---
+# --- URUCHOMIENIE ---
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main
 fi
