@@ -1,25 +1,28 @@
 #!/bin/bash
-# SKRYPT: init_git_dashboard.sh
-# CEL: Inicjalizacja Git w katalogu dashboard - JEDYNA zmiana w tym cyklu
+# SKRYPT: init_git_dashboard_v2.sh
+# CEL: Inicjalizacja Git w POPRAWNEJ ścieżce /opt/ai_firma_dashboard
 # DATA: 2024-12-29
 # AUTOR: Wojtek (AI Programista)
 
-echo "=== ETAP 3: ZMIANA - Inicjalizacja Git dla Dashboard ==="
-echo "Cel: Zainicjalizować Git w /var/www/ai_firma_dashboard i połączyć z GitHub"
+echo "=== ETAP 3: ZMIANA - Inicjalizacja Git dla Dashboard (poprawiona ścieżka) ==="
+echo "Cel: Zainicjalizować Git w /opt/ai_firma_dashboard i połączyć z GitHub"
 echo ""
 
-# 1. DIAGNOZA - sprawdzenie stanu wyjściowego
+# 1. DIAGNOZA - sprawdzenie stanu wyjściowego (POPRAWNA ŚCIEŻKA)
 echo "1. DIAGNOZA stanu wyjściowego..."
-DASHBOARD_DIR="/var/www/ai_firma_dashboard"
+DASHBOARD_DIR="/opt/ai_firma_dashboard"  # POPRAWIONE!
 REMOTE_URL="https://github.com/Lisek999/ai-firma-dashboard.git"
 
 if [ ! -d "$DASHBOARD_DIR" ]; then
     echo "❌ BŁĄD: Katalog $DASHBOARD_DIR nie istnieje!"
-    echo "Stan: Katalog nie znaleziony"
+    echo "Aktualna zawartość /opt/:"
+    ls -la /opt/
     exit 1
 fi
 
 echo "✅ Katalog istnieje: $DASHBOARD_DIR"
+echo "   Zawartość:"
+ls -la "$DASHBOARD_DIR" | head -5
 
 cd "$DASHBOARD_DIR"
 echo "   Praca w katalogu: $(pwd)"
@@ -72,7 +75,8 @@ echo "   d) Tworzenie pierwszego commita..."
 git commit -m "Initial commit - dashboard aplikacji AI Firma
 - Data: $(date '+%Y-%m-%d %H:%M:%S')
 - Autor: AI Firma CI
-- Cel: Backup dzienny do GitHub"
+- Cel: Backup dzienny do GitHub
+- Lokalizacja: /opt/ai_firma_dashboard"
 
 # Dodaj remote
 echo "   e) Dodawanie zdalnego repozytorium..."
@@ -93,8 +97,7 @@ echo "=== INICJALIZACJA ZAKOŃCZONA ==="
 echo ""
 echo "NASTĘPNY KROK (ręczny):"
 echo "Aby wypchnąć kod na GitHub, wykonaj:"
-echo "  cd /var/www/ai_firma_dashboard"
+echo "  cd /opt/ai_firma_dashboard"
 echo "  git push -u origin main"
 echo ""
 echo "Uwaga: Może być wymagane uwierzytelnienie (token GitHub)."
-echo "Po pushu przejdziemy do kolejnego cyklu DA-CZ-W."
