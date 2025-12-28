@@ -1,103 +1,103 @@
 #!/bin/bash
-# SKRYPT: init_git_dashboard_v2.sh
-# CEL: Inicjalizacja Git w POPRAWNEJ ścieżce /opt/ai_firma_dashboard
+# SKRYPT: push_dashboard_to_vps_repo.sh
+# CEL: Przeniesienie dashboard do podfolderu i push do ai-firma-vps
 # DATA: 2024-12-29
 # AUTOR: Wojtek (AI Programista)
 
-echo "=== ETAP 3: ZMIANA - Inicjalizacja Git dla Dashboard (poprawiona ścieżka) ==="
-echo "Cel: Zainicjalizować Git w /opt/ai_firma_dashboard i połączyć z GitHub"
+echo "=== ETAP 3: ZMIANA - Push dashboard do repo ai-firma-vps ==="
+echo "Cel: Przenieść kod do folderu dashboard_backup i push do głównego brancha"
 echo ""
 
-# 1. DIAGNOZA - sprawdzenie stanu wyjściowego (POPRAWNA ŚCIEŻKA)
+# 1. DIAGNOZA
 echo "1. DIAGNOZA stanu wyjściowego..."
-DASHBOARD_DIR="/opt/ai_firma_dashboard"  # POPRAWIONE!
-REMOTE_URL="https://github.com/Lisek999/ai-firma-dashboard.git"
+cd /opt/ai_firma_dashboard
 
-if [ ! -d "$DASHBOARD_DIR" ]; then
-    echo "❌ BŁĄD: Katalog $DASHBOARD_DIR nie istnieje!"
-    echo "Aktualna zawartość /opt/:"
-    ls -la /opt/
+if [ ! -d ".git" ]; then
+    echo "❌ BŁĄD: Brak repozytorium Git w /opt/ai_firma_dashboard"
     exit 1
 fi
 
-echo "✅ Katalog istnieje: $DASHBOARD_DIR"
-echo "   Zawartość:"
-ls -la "$DASHBOARD_DIR" | head -5
+echo "✅ Repozytorium Git istnieje"
+echo "   Aktualny remote:"
+git remote -v
+echo "   Branch: $(git branch --show-current)"
 
-cd "$DASHBOARD_DIR"
-echo "   Praca w katalogu: $(pwd)"
-
-# Sprawdź czy Git jest już zainicjalizowany
-if [ -d ".git" ]; then
-    echo "ℹ️  Git jest już zainicjalizowany w tym katalogu"
-    echo "   Remote:"
-    git remote -v
-    echo "   Branch: $(git branch --show-current 2>/dev/null || echo 'brak')"
-    exit 0
-else
-    echo "✅ Git NIE jest zainicjalizowany - kontynuujemy"
-fi
-
-# 2. ANALIZA - co zrobimy
+# 2. ANALIZA
 echo ""
 echo "2. ANALIZA planowanej zmiany..."
-echo "   - Inicjalizacja: git init"
-echo "   - Konfiguracja: git config user"
-echo "   - Dodanie plików: git add ."
-echo "   - Pierwszy commit: git commit -m 'Initial commit'"
-echo "   - Dodanie remote: git remote add origin $REMOTE_URL"
+echo "   - Zmiana remote na ai-firma-vps"
+echo "   - Stworzenie folderu dashboard_backup"
+echo "   - Przeniesienie wszystkich plików do dashboard_backup/"
+echo "   - Commit zmian"
+echo "   - Push do origin main"
 
-# 3. ZMIANA - wykonanie (tylko z potwierdzeniem)
+# 3. ZMIANA - wykonanie
 echo ""
 echo "3. ZMIANA - wykonanie..."
-read -p "Czy kontynuować inicjalizację Git? (TAK/n): " -n 1 -r
+read -p "Czy kontynuować? (TAK/n): " -n 1 -r
 echo ""
 if [[ ! $REPLY =~ ^[Tt]$ ]] && [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "❌ Anulowano - brak potwierdzenia"
+    echo "❌ Anulowano"
     exit 0
 fi
 
-# Inicjalizacja Git
-echo "   a) Inicjalizacja repozytorium..."
-git init
+# Zmiana remote
+echo "   a) Zmiana zdalnego repozytorium..."
+git remote set-url origin https://github.com/Lisek999/ai-firma-vps.git
+echo "   ✅ Nowy remote:"
+git remote -v
 
-# Konfiguracja użytkownika
-echo "   b) Konfiguracja użytkownika Git..."
-git config user.email "ci@ai-firma.com"
-git config user.name "AI Firma CI"
+# Pobierz najnowsze zmiany (jeśli repo nie jest puste)
+echo "   b) Pobieranie najnowszych zmian z remote..."
+git fetch origin
 
-# Dodaj wszystkie pliki
-echo "   c) Dodawanie plików do stage..."
+# Sprawdź czy main istnieje
+if git show-ref --verify --quiet refs/remotes/origin/main; then
+    echo "   ℹ️  Branch main istnieje zdalnie - pull"
+    git pull origin main --allow-unrelated-histories || echo "   ⚠️  Może być konflikt, kontynuujemy"
+else
+    echo "   ℹ️  Brak brancha main - tworzymy nowy"
+fi
+
+# Stwórz folder i przenieś pliki
+echo "   c) Tworzenie folderu dashboard_backup..."
+mkdir -p dashboard_backup
+
+echo "   d) Przenoszenie plików do dashboard_backup..."
+# Przenieś wszystko oprócz .git i dashboard_backup
+find . -maxdepth 1 -mindepth 1 ! -name '.git' ! -name 'dashboard_backup' -exec mv {} dashboard_backup/ \; 2>/dev/null
+
+# Sprawdź czy coś zostało przeniesione
+if [ "$(ls -A dashboard_backup 2>/dev/null)" ]; then
+    echo "   ✅ Pliki przeniesione"
+else
+    echo "   ⚠️  Brak plików do przeniesienia - może już są w folderze?"
+fi
+
+# Commit
+echo "   e) Dodawanie zmian i commit..."
 git add .
+git commit -m "Backup dashboard aplikacji AI Firma
 
-# Pierwszy commit
-echo "   d) Tworzenie pierwszego commita..."
-git commit -m "Initial commit - dashboard aplikacji AI Firma
 - Data: $(date '+%Y-%m-%d %H:%M:%S')
-- Autor: AI Firma CI
-- Cel: Backup dzienny do GitHub
-- Lokalizacja: /opt/ai_firma_dashboard"
+- Lokalizacja: /opt/ai_firma_dashboard
+- Struktura: dashboard_backup/
+- Cel: Backup dzienny do GitHub"
 
-# Dodaj remote
-echo "   e) Dodawanie zdalnego repozytorium..."
-git remote add origin "$REMOTE_URL"
+# Push
+echo "   f) Push do GitHub..."
+echo "   ⚠️  Uwaga: Może wymagać uwierzytelnienia tokenem"
+git push -u origin main
 
-# 4. WERYFIKACJA - stan po zmianie
+# 4. WERYFIKACJA
 echo ""
 echo "4. WERYFIKACJA - stan po zmianie..."
-echo "   ✅ Git zainicjalizowany: $(git rev-parse --git-dir 2>/dev/null && echo 'TAK' || echo 'NIE')"
-echo "   ✅ Remote ustawiony:"
+echo "   ✅ Remote:"
 git remote -v
 echo ""
-echo "   ✅ Status plików:"
-git status --short
-
+echo "   ✅ Struktura plików:"
+find . -type f -name "*.py" -o -name "*.html" -o -name "*.md" | head -10
 echo ""
-echo "=== INICJALIZACJA ZAKOŃCZONA ==="
-echo ""
-echo "NASTĘPNY KROK (ręczny):"
-echo "Aby wypchnąć kod na GitHub, wykonaj:"
-echo "  cd /opt/ai_firma_dashboard"
-echo "  git push -u origin main"
-echo ""
-echo "Uwaga: Może być wymagane uwierzytelnienie (token GitHub)."
+echo "=== ZMIANA ZAKOŃCZONA ==="
+echo "Sprawdź na GitHub: https://github.com/Lisek999/ai-firma-vps"
+echo "Powinien być folder dashboard_backup/"
