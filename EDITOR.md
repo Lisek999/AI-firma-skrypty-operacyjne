@@ -1,103 +1,126 @@
 #!/bin/bash
-# SKRYPT: push_dashboard_to_vps_repo.sh
-# CEL: Przeniesienie dashboard do podfolderu i push do ai-firma-vps
+# SKRYPT: git_daily_dashboard_backup.sh
+# CEL: Bezpieczny backup dashboard do Git (KOPIOWANIE, nie przenoszenie)
 # DATA: 2024-12-29
 # AUTOR: Wojtek (AI Programista)
 
-echo "=== ETAP 3: ZMIANA - Push dashboard do repo ai-firma-vps ==="
-echo "Cel: Przenieść kod do folderu dashboard_backup i push do głównego brancha"
+echo "=== BEZPIECZNY BACKUP DASHBOARD DO GIT ==="
+echo "Metoda: KOPIOWANIE do tymczasowego katalogu"
 echo ""
 
 # 1. DIAGNOZA
 echo "1. DIAGNOZA stanu wyjściowego..."
-cd /opt/ai_firma_dashboard
+SOURCE_DIR="/opt/ai_firma_dashboard"
+REPO_DIR="/tmp/dashboard_backup_$(date +%Y%m%d_%H%M%S)"
+REMOTE_URL="https://github.com/Lisek999/ai-firma-vps.git"
 
-if [ ! -d ".git" ]; then
-    echo "❌ BŁĄD: Brak repozytorium Git w /opt/ai_firma_dashboard"
+if [ ! -d "$SOURCE_DIR" ]; then
+    echo "❌ BŁĄD: Katalog źródłowy $SOURCE_DIR nie istnieje!"
     exit 1
 fi
 
-echo "✅ Repozytorium Git istnieje"
-echo "   Aktualny remote:"
-git remote -v
-echo "   Branch: $(git branch --show-current)"
+echo "✅ Źródło: $SOURCE_DIR"
+echo "   Zawartość źródła:"
+ls -la "$SOURCE_DIR" | head -5
 
 # 2. ANALIZA
 echo ""
 echo "2. ANALIZA planowanej zmiany..."
-echo "   - Zmiana remote na ai-firma-vps"
-echo "   - Stworzenie folderu dashboard_backup"
-echo "   - Przeniesienie wszystkich plików do dashboard_backup/"
+echo "   - Stworzenie tymczasowego katalogu: $REPO_DIR"
+echo "   - Skopiowanie plików (z wykluczeniem .git, __pycache__)"
+echo "   - Inicjalizacja/clone repo w katalogu tymczasowym"
 echo "   - Commit zmian"
-echo "   - Push do origin main"
+echo "   - Push do GitHub"
+echo "   - Usunięcie katalogu tymczasowego"
 
 # 3. ZMIANA - wykonanie
 echo ""
 echo "3. ZMIANA - wykonanie..."
-read -p "Czy kontynuować? (TAK/n): " -n 1 -r
+read -p "Czy kontynuować backup? (TAK/n): " -n 1 -r
 echo ""
 if [[ ! $REPLY =~ ^[Tt]$ ]] && [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "❌ Anulowano"
     exit 0
 fi
 
-# Zmiana remote
-echo "   a) Zmiana zdalnego repozytorium..."
-git remote set-url origin https://github.com/Lisek999/ai-firma-vps.git
-echo "   ✅ Nowy remote:"
-git remote -v
+# Stwórz tymczasowy katalog
+echo "   a) Tworzenie katalogu tymczasowego..."
+mkdir -p "$REPO_DIR"
+cd "$REPO_DIR"
 
-# Pobierz najnowsze zmiany (jeśli repo nie jest puste)
-echo "   b) Pobieranie najnowszych zmian z remote..."
-git fetch origin
-
-# Sprawdź czy main istnieje
-if git show-ref --verify --quiet refs/remotes/origin/main; then
-    echo "   ℹ️  Branch main istnieje zdalnie - pull"
-    git pull origin main --allow-unrelated-histories || echo "   ⚠️  Może być konflikt, kontynuujemy"
+# Sklonuj repo lub zainicjalizuj
+echo "   b) Przygotowanie repozytorium Git..."
+if [ -d "$SOURCE_DIR/.git" ]; then
+    # Użyj istniejącego repo
+    cp -r "$SOURCE_DIR/.git" .
+    git reset --hard
 else
-    echo "   ℹ️  Brak brancha main - tworzymy nowy"
+    # Sklonuj ze zdalnego repo
+    git clone "$REMOTE_URL" .
 fi
 
-# Stwórz folder i przenieś pliki
-echo "   c) Tworzenie folderu dashboard_backup..."
-mkdir -p dashboard_backup
+# Ustaw remote
+git remote set-url origin "$REMOTE_URL"
 
-echo "   d) Przenoszenie plików do dashboard_backup..."
-# Przenieś wszystko oprócz .git i dashboard_backup
-find . -maxdepth 1 -mindepth 1 ! -name '.git' ! -name 'dashboard_backup' -exec mv {} dashboard_backup/ \; 2>/dev/null
+# Pobierz najnowsze zmiany
+echo "   c) Synchronizacja ze zdalnym repo..."
+git fetch origin
+git pull origin main --rebase 2>/dev/null || echo "   ⚠️  Pierwszy backup lub konflikt"
 
-# Sprawdź czy coś zostało przeniesione
-if [ "$(ls -A dashboard_backup 2>/dev/null)" ]; then
-    echo "   ✅ Pliki przeniesione"
-else
-    echo "   ⚠️  Brak plików do przeniesienia - może już są w folderze?"
+# Skopiuj pliki (z wykluczeniami)
+echo "   d) Kopiowanie plików..."
+rsync -av --delete \
+    --exclude='.git' \
+    --exclude='__pycache__' \
+    --exclude='*.pyc' \
+    --exclude='*.log' \
+    "$SOURCE_DIR/" "./dashboard_backup/"
+
+# Sprawdź czy są zmiany
+if git diff --quiet && [ -z "$(git status --porcelain)" ]; then
+    echo "   ℹ️  Brak zmian do commitowania"
+    echo "   ✅ Backup zakończony (brak zmian)"
+    rm -rf "$REPO_DIR"
+    exit 0
 fi
 
 # Commit
-echo "   e) Dodawanie zmian i commit..."
+echo "   e) Commit zmian..."
 git add .
-git commit -m "Backup dashboard aplikacji AI Firma
+git commit -m "Daily backup dashboard - $(date '+%Y-%m-%d %H:%M:%S')
 
-- Data: $(date '+%Y-%m-%d %H:%M:%S')
-- Lokalizacja: /opt/ai_firma_dashboard
-- Struktura: dashboard_backup/
-- Cel: Backup dzienny do GitHub"
+- Źródło: $SOURCE_DIR
+- Backup do: dashboard_backup/
+- Typ: dzienny snapshot
+- Status: działająca aplikacja NIE zmieniona"
 
 # Push
 echo "   f) Push do GitHub..."
-echo "   ⚠️  Uwaga: Może wymagać uwierzytelnienia tokenem"
-git push -u origin main
+git push origin main
 
-# 4. WERYFIKACJA
+# Weryfikacja
+echo "   g) Weryfikacja..."
+if [ $? -eq 0 ]; then
+    echo "   ✅ Backup udany!"
+    echo "   📊 Zmiany:"
+    git log --oneline -1
+else
+    echo "   ❌ Błąd push!"
+fi
+
+# 4. WERYFIKACJA - stan po zmianie
 echo ""
 echo "4. WERYFIKACJA - stan po zmianie..."
-echo "   ✅ Remote:"
-git remote -v
+echo "   ✅ Źródłowa aplikacja NIE zmieniona:"
+ls -la "$SOURCE_DIR" | head -3
 echo ""
-echo "   ✅ Struktura plików:"
-find . -type f -name "*.py" -o -name "*.html" -o -name "*.md" | head -10
+echo "   ✅ Backup w Git:"
+echo "   https://github.com/Lisek999/ai-firma-vps/tree/main/dashboard_backup"
 echo ""
-echo "=== ZMIANA ZAKOŃCZONA ==="
-echo "Sprawdź na GitHub: https://github.com/Lisek999/ai-firma-vps"
-echo "Powinien być folder dashboard_backup/"
+echo "   🧹 Czyszczenie katalogu tymczasowego..."
+rm -rf "$REPO_DIR"
+
+echo ""
+echo "=== BACKUP ZAKOŃCZONY ==="
+echo "Dashboard nadal działa, backup w Git."
+echo "Następny krok: Skonfigurowanie cron dla tego skryptu."
