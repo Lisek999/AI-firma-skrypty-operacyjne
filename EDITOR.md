@@ -1,42 +1,45 @@
 #!/bin/bash
-# SKRYPT: git_daily_skrypty_backup.sh
-# CEL: Backup skryptów operacyjnych do Git
+# SKRYPT: git_weekly_full_backup.sh
+# CEL: Tygodniowy pełny backup do archiwum .tar.gz
 # DATA: 2024-12-29
 # AUTOR: Wojtek (AI Programista)
 
-echo "=== BACKUP SKRYPTÓW OPERACYJNYCH DO GIT ==="
-echo "Repozytorium: ai-firma-vps (folder: skrypty_backup)"
+echo "=== TYGODNIOWY PEŁNY BACKUP (ARCHIWUM .tar.gz) ==="
+echo "Repozytorium: ai-firma-vps (folder: weekly_archives)"
 echo ""
 
 # 1. DIAGNOZA
 echo "1. DIAGNOZA stanu wyjściowego..."
-SOURCE_DIR="/opt/ai_firma_skrypty"
-REPO_DIR="/tmp/skrypty_backup_$(date +%Y%m%d_%H%M%S)"
+BACKUP_DIRS=(
+    "/opt/ai_firma_dashboard"
+    "/opt/ai_firma_skrypty"
+    "/home/ubuntu/ai_firma_dokumenty"
+)
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+REPO_DIR="/tmp/weekly_backup_$TIMESTAMP"
 REMOTE_URL="git@github.com:Lisek999/ai-firma-vps.git"
 
-if [ ! -d "$SOURCE_DIR" ]; then
-    echo "❌ BŁĄD: Katalog źródłowy $SOURCE_DIR nie istnieje!"
-    echo "   Aktualna zawartość /opt/:"
-    ls -la /opt/
-    exit 1
-fi
-
-echo "✅ Źródło: $SOURCE_DIR"
-echo "   Zawartość źródła:"
-ls -la "$SOURCE_DIR"
+echo "✅ Katalogi do backupu:"
+for dir in "${BACKUP_DIRS[@]}"; do
+    if [ -d "$dir" ]; then
+        echo "   - $dir (istnieje)"
+    else
+        echo "   - $dir (NIE istnieje - pomijam)"
+    fi
+done
 
 # 2. ANALIZA
 echo ""
 echo "2. ANALIZA planowanej zmiany..."
 echo "   - Stworzenie tymczasowego katalogu: $REPO_DIR"
-echo "   - Skopiowanie skryptów (bez tymczasowych plików)"
-echo "   - Commit do folderu skrypty_backup/"
-echo "   - Push do GitHub"
+echo "   - Utworzenie archiwum .tar.gz dla każdego katalogu"
+echo "   - Dodanie archiwów do folderu weekly_archives/"
+echo "   - Commit i push"
 
 # 3. ZMIANA - wykonanie
 echo ""
 echo "3. ZMIANA - wykonanie..."
-read -p "Czy kontynuować backup skryptów? (TAK/n): " -n 1 -r
+read -p "Czy wykonać tygodniowy pełny backup? (TAK/n): " -n 1 -r
 echo ""
 if [[ ! $REPLY =~ ^[Tt]$ ]] && [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "❌ Anulowano"
@@ -53,62 +56,81 @@ echo "   b) Klonowanie repozytorium..."
 git clone "$REMOTE_URL" .
 git checkout main
 
-# Skopiuj skrypty (z wykluczeniami)
-echo "   c) Kopiowanie skryptów..."
-mkdir -p skrypty_backup
-rsync -av --delete \
-    --exclude='.git' \
-    --exclude='*.tmp' \
-    --exclude='*.log' \
-    --exclude='*.bak' \
-    --exclude='*.old' \
-    "$SOURCE_DIR/" "./skrypty_backup/"
+# Stwórz folder weekly_archives
+mkdir -p weekly_archives
 
-# Sprawdź czy są zmiany
-if git diff --quiet && [ -z "$(git status --porcelain)" ]; then
-    echo "   ℹ️  Brak zmian do commitowania"
-    echo "   ✅ Backup zakończony (brak zmian)"
+# Dla każdego katalogu utwórz archiwum
+for source_dir in "${BACKUP_DIRS[@]}"; do
+    if [ ! -d "$source_dir" ]; then
+        echo "   ⚠️  Pomijam: $source_dir (nie istnieje)"
+        continue
+    fi
+    
+    dir_name=$(basename "$source_dir")
+    archive_name="backup_${dir_name}_${TIMESTAMP}.tar.gz"
+    archive_path="weekly_archives/$archive_name"
+    
+    echo "   c) Tworzenie archiwum dla $dir_name..."
+    
+    # Utwórz archiwum z wykluczeniami
+    tar -czf "$archive_path" \
+        -C "$(dirname "$source_dir")" \
+        --exclude=".git" \
+        --exclude="__pycache__" \
+        --exclude="*.pyc" \
+        --exclude="*.log" \
+        --exclude="*.tmp" \
+        "$(basename "$source_dir")"
+    
+    if [ $? -eq 0 ]; then
+        archive_size=$(du -h "$archive_path" | cut -f1)
+        echo "   ✅ Utworzono: $archive_name ($archive_size)"
+    else
+        echo "   ❌ Błąd tworzenia archiwum dla $dir_name"
+    fi
+done
+
+# Sprawdź czy utworzono jakieś archiwa
+if [ -z "$(ls -A weekly_archives 2>/dev/null)" ]; then
+    echo "   ❌ Nie utworzono żadnych archiwów!"
     rm -rf "$REPO_DIR"
-    exit 0
+    exit 1
 fi
 
 # Commit
-echo "   d) Commit zmian..."
-git add skrypty_backup/
-git commit -m "Daily backup skryptów operacyjnych - $(date '+%Y-%m-%d %H:%M:%S')
+echo "   d) Commit archiwów..."
+git add weekly_archives/
+git commit -m "Tygodniowy pełny backup - $TIMESTAMP
 
-- Źródło: $SOURCE_DIR
-- Backup do: skrypty_backup/
-- Typ: dzienny snapshot
-- Liczba plików: $(find skrypty_backup/ -type f | wc -l)"
+- Archiwa: $(ls weekly_archives/ | xargs)
+- Rozmiar: $(du -sh weekly_archives/ | cut -f1)
+- Typ: pełny backup (archiwum .tar.gz)
+- Retencja: tygodniowe snapshots"
 
 # Push
 echo "   e) Push do GitHub..."
 git push origin main
 
-# Weryfikacja
-echo "   f) Weryfikacja..."
+# 4. WERYFIKACJA
+echo ""
+echo "4. WERYFIKACJA..."
 if [ $? -eq 0 ]; then
-    echo "   ✅ Backup skryptów udany!"
-    echo "   📊 Zmiany:"
-    git log --oneline -1
+    echo "   ✅ Tygodniowy backup udany!"
+    echo "   📊 Utworzone archiwa:"
+    ls -lh weekly_archives/
+    echo ""
+    echo "   🔗 Dostępne na GitHub:"
+    echo "   https://github.com/Lisek999/ai-firma-vps/tree/main/weekly_archives"
 else
     echo "   ❌ Błąd push!"
 fi
 
-# 4. WERYFIKACJA - stan po zmianie
+# Czyszczenie
 echo ""
-echo "4. WERYFIKACJA - stan po zmianie..."
-echo "   ✅ Źródłowe skrypty NIE zmienione:"
-ls -la "$SOURCE_DIR" | head -5
-echo ""
-echo "   ✅ Backup w Git:"
-echo "   https://github.com/Lisek999/ai-firma-vps/tree/main/skrypty_backup"
-echo ""
-echo "   🧹 Czyszczenie katalogu tymczasowego..."
+echo "🧹 Czyszczenie katalogu tymczasowego..."
 rm -rf "$REPO_DIR"
 
 echo ""
-echo "=== BACKUP SKRYPTÓW ZAKOŃCZONY ==="
-echo "Skrypty backupowane, struktura źródłowa niezmieniona."
-echo "Następny krok: Backup tygodniowy (pełny archiwum)."
+echo "=== TYGODNIOWY BACKUP ZAKOŃCZONY ==="
+echo "Archiwa .tar.gz zapisane w weekly_archives/"
+echo "Następny krok: Konfiguracja cron dla backupów dziennych i tygodniowych."
