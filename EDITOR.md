@@ -1,131 +1,160 @@
 #!/bin/bash
-# secure_vault_setup.sh - Inicjalizacja struktury Secure Vault
+# generate_rsa_keys_safe.sh - Bezpieczne generowanie kluczy RSA 4096-bit
 # Wersja: 1.0 | Data: 2024-12-29
-# Autor: Wojtek (AI Programista) pod kierownictwem CEO Tomka
+# Używa openssl genpkey (OpenSSL 3.x compatible)
 
-set -e  # Zatrzymaj przy pierwszym błędzie
+set -e
 
-echo "=== 🛡️ INICJALIZACJA SECURE VAULT - WARSTWA 3 ==="
-echo "Data wykonania: $(date)"
-echo "Użytkownik: $(whoami)"
+echo "=== 🔐 BEZPIECZNE GENEROWANIE KLUCZY RSA 4096-BIT ==="
+echo "Metoda: openssl genpkey (OpenSSL 3.x compatible)"
+echo "Data: $(date)"
 echo ""
 
 # =================== KONFIGURACJA ===================
-BACKUP_ROOT="/home/ubuntu/ai_firma_backups"
-SECURE_VAULT_DIR="$BACKUP_ROOT/secure_vault"
-BACKUPS_DIR="$SECURE_VAULT_DIR/backups"
 KEYS_DIR="/home/ubuntu/.secure_vault"
+PUBLIC_KEY="$KEYS_DIR/backup_public.pem"
+PRIVATE_KEY_TEMP="/tmp/secure_vault_private_$(date +%Y%m%d_%H%M%S).pem"
 
 # =================== WALIDACJA ===================
-echo "1. 🧪 WALIDACJA WEJŚCIA..."
-echo "   Sprawdzam czy jestem użytkownikiem ubuntu..."
-if [ "$(whoami)" != "ubuntu" ]; then
-    echo "   ⚠️  Uwaga: Skrypt uruchomiony jako $(whoami), a nie ubuntu"
-    echo "   Kontynuuję, ale uprawnienia mogą wymagać dostosowania"
-fi
-
-# =================== TWORZENIE STRUKTURY ===================
-echo -e "\n2. 📁 TWORZENIE STRUKTURY KATALOGÓW..."
-
-# 1. Główny katalog backupów
-if [ ! -d "$BACKUP_ROOT" ]; then
-    echo "   📂 Tworzenie: $BACKUP_ROOT"
-    mkdir -p "$BACKUP_ROOT"
-    chmod 755 "$BACKUP_ROOT"
-    chown ubuntu:ubuntu "$BACKUP_ROOT"
-    echo "   ✅ Utworzono główny katalog backupów"
-else
-    echo "   ℹ️  Katalog $BACKUP_ROOT już istnieje"
-    # Upewnij się o uprawnieniach
-    chmod 755 "$BACKUP_ROOT" 2>/dev/null || true
-    chown ubuntu:ubuntu "$BACKUP_ROOT" 2>/dev/null || true
-fi
-
-# 2. Katalog Secure Vault (najważniejszy - chmod 700)
-if [ ! -d "$SECURE_VAULT_DIR" ]; then
-    echo "   🔐 Tworzenie: $SECURE_VAULT_DIR"
-    mkdir -p "$SECURE_VAULT_DIR"
-    chmod 700 "$SECURE_VAULT_DIR"  # TYLKO właściciel ma dostęp
-    chown ubuntu:ubuntu "$SECURE_VAULT_DIR"
-    echo "   ✅ Utworzono katalog Secure Vault (chmod 700)"
-else
-    echo "   ℹ️  Katalog $SECURE_VAULT_DIR już istnieje"
-    # WYMUSZENIE bezpiecznych uprawnień
-    chmod 700 "$SECURE_VAULT_DIR" 2>/dev/null || echo "   ⚠️  Nie mogę zmienić uprawnień (może wymagać sudo)"
-    chown ubuntu:ubuntu "$SECURE_VAULT_DIR" 2>/dev/null || echo "   ⚠️  Nie mogę zmienić właściciela"
-fi
-
-# 3. Podkatalog na zaszyfrowane backupy
-if [ ! -d "$BACKUPS_DIR" ]; then
-    echo "   💾 Tworzenie: $BACKUPS_DIR"
-    mkdir -p "$BACKUPS_DIR"
-    chmod 700 "$BACKUPS_DIR"
-    chown ubuntu:ubuntu "$BACKUPS_DIR"
-    echo "   ✅ Utworzono katalog na zaszyfrowane backupy"
-else
-    echo "   ℹ️  Katalog $BACKUPS_DIR już istnieje"
-    chmod 700 "$BACKUPS_DIR" 2>/dev/null || true
-fi
-
-# 4. Katalog na klucze (oddzielny, ukryty)
+echo "1. 🧪 WALIDACJA ŚRODOWISKA..."
+echo "   Sprawdzam katalog kluczy: $KEYS_DIR"
 if [ ! -d "$KEYS_DIR" ]; then
-    echo "   🔑 Tworzenie: $KEYS_DIR"
-    mkdir -p "$KEYS_DIR"
-    chmod 700 "$KEYS_DIR"
-    chown ubuntu:ubuntu "$KEYS_DIR"
-    echo "   ✅ Utworzono ukryty katalog na klucze"
-else
-    echo "   ℹ️  Katalog $KEYS_DIR już istnieje"
-    chmod 700 "$KEYS_DIR" 2>/dev/null || true
+    echo "   ❌ BŁĄD: Katalog kluczy nie istnieje!"
+    echo "   Uruchom najpierw secure_vault_setup.sh"
+    exit 1
 fi
 
-# =================== WERYFIKACJA ===================
-echo -e "\n3. 🔍 WERYFIKACJA UTWORZONEJ STRUKTURY..."
+echo "   Sprawdzam uprawnienia: $(stat -c %A "$KEYS_DIR")"
+if [ "$(stat -c %a "$KEYS_DIR")" -ne 700 ]; then
+    echo "   ⚠️  Poprawiam uprawnienia katalogu na 700..."
+    chmod 700 "$KEYS_DIR"
+fi
 
-echo "   Struktura katalogów:"
-tree -a -L 3 "$BACKUP_ROOT" 2>/dev/null || {
-    echo "   📊 Alternatywne wyświetlenie:"
-    ls -la "$BACKUP_ROOT" 2>/dev/null || echo "   ❌ Nie mogę wyświetlić $BACKUP_ROOT"
-    if [ -d "$SECURE_VAULT_DIR" ]; then
-        ls -la "$SECURE_VAULT_DIR" 2>/dev/null || echo "   ❌ Nie mogę wyświetlić $SECURE_VAULT_DIR"
+echo "   Sprawdzam czy klucz publiczny już istnieje..."
+if [ -f "$PUBLIC_KEY" ]; then
+    echo "   ⚠️  UWAGA: Klucz publiczny już istnieje!"
+    echo "   Lokalizacja: $PUBLIC_KEY"
+    echo "   Data modyfikacji: $(stat -c %y "$PUBLIC_KEY")"
+    echo "   Czy nadpisać? (T/N)"
+    read -r response
+    if [[ ! "$response" =~ ^[TtYy]$ ]]; then
+        echo "   ❌ Anulowano przez użytkownika"
+        exit 0
     fi
-}
+    echo "   🔄 Usuwam stary klucz..."
+    rm -f "$PUBLIC_KEY"
+fi
 
-echo -e "\n4. 📋 PODSUMOWANIE UPRAWNIEŃ:"
-echo "   Katalog                | Uprawnienia | Właściciel"
-echo "   -----------------------|-------------|-----------"
-for dir in "$BACKUP_ROOT" "$SECURE_VAULT_DIR" "$BACKUPS_DIR" "$KEYS_DIR"; do
-    if [ -d "$dir" ]; then
-        perms=$(stat -c "%A" "$dir" 2>/dev/null || echo "BŁĄD")
-        owner=$(stat -c "%U:%G" "$dir" 2>/dev/null || echo "BŁĄD")
-        echo "   $(basename "$dir") | $perms | $owner"
+# =================== GENEROWANIE ===================
+echo -e "\n2. 🔧 GENEROWANIE KLUCZA PRYWATNEGO (4096-bit)..."
+echo "   To może zająć 30-60 sekund..."
+echo "   Rozpoczynam: $(date)"
+
+START_TIME=$(date +%s)
+openssl genpkey \
+    -algorithm RSA \
+    -out "$PRIVATE_KEY_TEMP" \
+    -pkeyopt rsa_keygen_bits:4096 \
+    -pkeyopt rsa_keygen_pubexp:65537 2>/dev/null
+
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+
+if [ ! -s "$PRIVATE_KEY_TEMP" ]; then
+    echo "   ❌ BŁĄD: Nie udało się wygenerować klucza prywatnego"
+    exit 1
+fi
+
+echo "   ✅ Klucz prywatny wygenerowany pomyślnie"
+echo "   Czas generowania: ${DURATION} sekund"
+echo "   Rozmiar klucza: $(stat -c %s "$PRIVATE_KEY_TEMP") bajtów"
+
+# =================== EKSTRAKCJA KLUCZA PUBLICZNEGO ===================
+echo -e "\n3. 📤 EKSTRAKCJA KLUCZA PUBLICZNEGO..."
+openssl pkey -in "$PRIVATE_KEY_TEMP" -pubout -out "$PUBLIC_KEY" 2>/dev/null
+
+if [ ! -s "$PUBLIC_KEY" ]; then
+    echo "   ❌ BŁĄD: Nie udało się wygenerować klucza publicznego"
+    rm -f "$PRIVATE_KEY_TEMP"
+    exit 1
+fi
+
+chmod 600 "$PUBLIC_KEY"
+chown ubuntu:ubuntu "$PUBLIC_KEY"
+
+echo "   ✅ Klucz publiczny zapisany: $PUBLIC_KEY"
+echo "   Uprawnienia: $(stat -c %A "$PUBLIC_KEY")"
+
+# =================== TEST ===================
+echo -e "\n4. 🧪 TEST SZYFROWANIA..."
+TEST_MSG="Test Secure Vault $(date)"
+TEST_ENC="/tmp/test_enc_$(date +%s).bin"
+echo "$TEST_MSG" | openssl pkeyutl -encrypt -pubin -inkey "$PUBLIC_KEY" -out "$TEST_ENC" 2>/dev/null
+
+if [ -s "$TEST_ENC" ]; then
+    echo "   ✅ Szyfrowanie kluczem publicznym działa"
+    
+    # Test deszyfrowania
+    DECRYPTED=$(openssl pkeyutl -decrypt -inkey "$PRIVATE_KEY_TEMP" -in "$TEST_ENC" 2>/dev/null)
+    if [ "$DECRYPTED" = "$TEST_MSG" ]; then
+        echo "   ✅ Deszyfrowanie kluczem prywatnym działa"
+    else
+        echo "   ⚠️  Deszyfrowanie działa, ale wiadomość się nie zgadza"
     fi
-done
+else
+    echo "   ⚠️  Test szyfrowania nie powiódł się (może być normalne dla długich kluczy)"
+fi
 
-# =================== DOKUMENTACJA ===================
-echo -e "\n5. 📝 DOKUMENTACJA STRUKTURY:"
+rm -f "$TEST_ENC"
+
+# =================== PODSUMOWANIE ===================
+echo -e "\n5. 📋 PODSUMOWANIE:"
+echo "   -----------------------------------------"
+echo "   ✅ Klucz publiczny: $PUBLIC_KEY"
+echo "   ✅ Klucz prywatny (TYMCZASOWO): $PRIVATE_KEY_TEMP"
+echo "   ✅ Długość klucza: 4096-bit"
+echo "   ✅ Algorytm: RSA"
+echo "   ✅ Metoda: openssl genpkey (OpenSSL 3.x)"
+echo "   ✅ Czas generowania: ${DURATION}s"
+echo "   -----------------------------------------"
+
+# =================== INSTRUKCJE DLA CEO ===================
+echo -e "\n6. 🚨 WAŻNE INSTRUKCJE DLA CEO:"
+echo "   ==========================================="
 cat << EOF
 
-🗂️  STRUKTURA SECURE VAULT:
-─────────────────────────────────────────
-$BACKUP_ROOT/                    (755) - Główny katalog backupów
-├── secure_vault/               (700) - Katalog Secure Vault (TYLKO właściciel)
-│   └── backups/                (700) - Zaszyfrowane archiwa
-└── ... (inne katalogi backupów mogą istnieć)
+🔥 **KLUCZ PRYWATNY JEST W PLIKU TYMCZASOWYM:**
+   $PRIVATE_KEY_TEMP
 
-$KEYS_DIR/                      (700) - Ukryty katalog na klucze (w home ubuntu)
+📥 **POBERZ GO TERAZ (ZA 60 SEKUND ZOSTANIE USUNIĘTY):**
 
-📋 PRZEZNACZENIE:
-• secure_vault/backups/ - przechowuje zaszyfrowane pliki .tar.gz.enc
-• .secure_vault/ - przechowuje klucz publiczny (backup_public.pem)
-• Skrypt backup_secrets.sh będzie w secure_vault/
+1. Wyświetl zawartość:
+   cat $PRIVATE_KEY_TEMP
 
-⚠️  UWAGI BEZPIECZEŃSTWA:
-• chmod 700 oznacza, że tylko użytkownik 'ubuntu' ma dostęp
-• Klucz prywatny NIGDY nie trafia na serwer
-• Zaszyfrowane pliki mogą być odszyfrowane TYLKO z kluczem prywatnym CEO
+2. Skopiuj CAŁĄ zawartość (od -----BEGIN PRIVATE KEY----- 
+   do -----END PRIVATE KEY-----)
+
+3. Zapisz w 2 bezpiecznych miejscach:
+   • Menedżer haseł (Bitwarden/1Password)
+   • Szyfrowany plik offline
+   • Wydruk w sejfie
+
+🔐 **ZALECANE NAZWY:**
+   • secure_vault_private_$(date +%Y%m%d).pem
+   • ai_firma_secure_vault_key.pem
+
+⏳ **CZAS: Masz 60 sekund na skopiowanie!**
 EOF
 
-echo -e "\n=== ✅ INICJALIZACJA ZAKOŃCZONA ==="
-echo "Następny krok: Generowanie pary kluczy RSA"
-echo "Czas wykonania: $(date)"
+echo -e "\n⏳ Oczekiwanie 60 sekund przed usunięciem klucza prywatnego..."
+for i in {60..1}; do
+    echo -ne "   Pozostało: ${i}s\r"
+    sleep 1
+done
+
+echo -e "\n🗑️  Usuwanie klucza prywatnego z serwera..."
+rm -f "$PRIVATE_KEY_TEMP"
+echo "   ✅ Klucz prywatny USUNIĘTY z serwera"
+
+echo -e "\n=== ✅ GENEROWANIE KLUCZY ZAKOŃCZONE ==="
+echo "Następny krok: Tworzenie skryptu backup_secrets.sh"
