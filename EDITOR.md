@@ -1,12 +1,12 @@
 #!/bin/bash
-# generate_rsa_keys_mobile.sh - Generowanie kluczy dla środowiska mobilnego
-# Wersja: 1.1 | Data: 2024-12-29
-# Klucz prywatny wyświetlany w terminalu do skopiowania
+# secure_vault_generate_keys_final.sh - Generowanie nowej pary kluczy
+# Wersja: 1.2 | Data: 2024-12-29
+# Bez pytań, bez potwierdzeń - stary klucz jest bezużyteczny
 
 set -e
 
-echo "=== 🔐 GENEROWANIE KLUCZY RSA (ŚRODOWISKO MOBILNE) ==="
-echo "UWAGA: Klucz prywatny zostanie WYŚWIETLONY w terminalu"
+echo "=== 🔐 GENEROWANIE NOWEJ PARY KLUCZY RSA 4096-BIT ==="
+echo "Stary klucz publiczny jest bezużyteczny bez klucza prywatnego"
 echo "Data: $(date)"
 echo ""
 
@@ -22,40 +22,37 @@ if [ ! -d "$KEYS_DIR" ]; then
     exit 1
 fi
 
-if [ -f "$PUBLIC_KEY" ]; then
-    echo "   ⚠️  Klucz publiczny już istnieje!"
-    echo "   Czy nadpisać? (T/N)"
-    read -r response
-    if [[ ! "$response" =~ ^[TtYy]$ ]]; then
-        echo "   ❌ Anulowano"
-        exit 0
-    fi
-    rm -f "$PUBLIC_KEY"
-fi
+echo "   Usuwam stary klucz publiczny (bezużyteczny)..."
+rm -f "$PUBLIC_KEY" 2>/dev/null || true
 
 # =================== GENEROWANIE ===================
-echo -e "\n2. 🔧 GENEROWANIE KLUCZA PRYWATNEGO (4096-bit)..."
+echo -e "\n2. 🔧 GENEROWANIE KLUCZA PRYWATNEGO..."
 echo "   To może zająć 30-60 sekund..."
 echo "   Rozpoczynam: $(date)"
 
+START_TIME=$(date +%s)
 PRIVATE_KEY_CONTENT=$(openssl genpkey \
     -algorithm RSA \
     -pkeyopt rsa_keygen_bits:4096 \
     -pkeyopt rsa_keygen_pubexp:65537 2>/dev/null)
 
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+
 if [ -z "$PRIVATE_KEY_CONTENT" ]; then
-    echo "   ❌ BŁĄD: Nie udało się wygenerować klucza"
+    echo "   ❌ BŁĄD: Nie udało się wygenerować klucza prywatnego"
     exit 1
 fi
 
 echo "   ✅ Klucz prywatny wygenerowany pomyślnie"
+echo "   Czas generowania: ${DURATION} sekund"
 
 # =================== ZAPIS KLUCZA PUBLICZNEGO ===================
-echo -e "\n3. 📤 TWORZENIE KLUCZA PUBLICZNEGO..."
+echo -e "\n3. 📤 ZAPISYWANIE KLUCZA PUBLICZNEGO..."
 echo "$PRIVATE_KEY_CONTENT" | openssl pkey -pubout -out "$PUBLIC_KEY" 2>/dev/null
 
 if [ ! -s "$PUBLIC_KEY" ]; then
-    echo "   ❌ BŁĄD: Nie udało się utworzyć klucza publicznego"
+    echo "   ❌ BŁĄD: Nie udało się zapisać klucza publicznego"
     exit 1
 fi
 
@@ -63,55 +60,46 @@ chmod 600 "$PUBLIC_KEY"
 chown ubuntu:ubuntu "$PUBLIC_KEY"
 
 echo "   ✅ Klucz publiczny zapisany: $PUBLIC_KEY"
+echo "   Uprawnienia: $(stat -c %A "$PUBLIC_KEY")"
 
 # =================== WYŚWIETLENIE KLUCZA PRYWATNEGO ===================
-echo -e "\n4. 🚨 ==================================================="
-echo "   🔥 KLUCZ PRYWATNY - SKOPIUJ CAŁOŚĆ PONIŻEJ 🔥"
-echo "   ==================================================="
+echo -e "\n4. 🚨 ==========================================================="
+echo "   🔥🔥🔥 KLUCZ PRYWATNY - SKOPIUJ CAŁOŚĆ PONIŻEJ 🔥🔥🔥"
+echo "   ==========================================================="
 echo ""
 echo "$PRIVATE_KEY_CONTENT"
 echo ""
-echo "   ==================================================="
-echo "   ✅ Koniec klucza prywatnego"
-echo "   ==================================================="
+echo "   ==========================================================="
+echo "   ✅ KONIEC KLUCZA PRYWATNEGO"
+echo "   ==========================================================="
 
-# =================== INSTRUKCJE KOPIOWANIA ===================
+# =================== INSTRUKCJE ===================
 echo -e "\n5. 📋 INSTRUKCJE KOPIOWANIA W TERMINUSIE:"
 cat << 'EOF'
 
-📥 **JAK SKOPIOWAĆ W TERMINUSIE:**
-
-1. DOTKNIJ i PRZYTRZYMAJ w dowolnym miejscu klucza powyżej
+📥 **JAK SKOPIOWAĆ:**
+1. DOTKNIJ i PRZYTRZYMAJ gdziekolwiek w kluczu powyżej
 2. Wybierz "SELECT ALL" (Zaznacz wszystko)
 3. Wybierz "COPY" (Kopiuj)
-4. Wklej do:
-   • Notatnika na telefonie
-   • Aplikacji do notatek
-   • Menedżera haseł
+4. Wklej do bezpiecznego miejsca
 
-💾 **ZALECANE NAZWY PLIKU:**
-   • secure_vault_private_$(date +%Y%m%d).pem
-   • ai_firma_secure_vault_key.pem
+💾 **ZAPISZ W 2 MIEJSCACH:**
+• Menedżer haseł (Bitwarden/1Password)
+• Notatnik na telefonie
+• Wydruk w sejfie
 
-⚠️  **OSTRZEŻENIA:**
-   • Klucz jest wyświetlony TYLKO RAZ
-   • Nie zapisuj na serwerze
-   • Zachowaj w 2 bezpiecznych miejscach
-   • Bez tego klucza backupy są BEZUŻYTECZNE
+⚠️  **BEZ TEGO KLUCZA BACKUPY SĄ BEZUŻYTECZNE!**
 EOF
 
 # =================== TEST ===================
 echo -e "\n6. 🧪 TEST SYGNALIZACYJNY..."
-echo "   Testuję czy klucz publiczny działa..."
-TEST_MSG="OK"
-if echo "$TEST_MSG" | openssl pkeyutl -encrypt -pubin -inkey "$PUBLIC_KEY" -out /tmp/test_enc.bin 2>/dev/null; then
-    echo "   ✅ Klucz publiczny działa"
-else
-    echo "   ⚠️  Test szyfrowania pominięty (może wymagać więcej danych)"
-fi
-rm -f /tmp/test_enc.bin 2>/dev/null
+echo "test" | timeout 2 openssl pkeyutl -encrypt -pubin -inkey "$PUBLIC_KEY" 2>&1 >/dev/null && echo "   ✅ Klucz publiczny działa" || echo "   ⚠️  Test pominięty"
+
+# =================== PODSUMOWANIE ===================
+echo -e "\n7. 📊 PODSUMOWANIE:"
+echo "   Klucz publiczny: $PUBLIC_KEY"
+echo "   Fingerprint: $(openssl rsa -pubin -in "$PUBLIC_KEY" -outform DER 2>/dev/null | openssl md5 -c 2>/dev/null | awk '{print $2}')"
+echo "   Czas generowania: ${DURATION}s"
 
 echo -e "\n=== ✅ GENEROWANIE ZAKOŃCZONE ==="
-echo "Klucz publiczny: $PUBLIC_KEY"
-echo "Klucz prywatny: SKOPIOWANY POWYŻEJ"
-echo "Następny krok: backup_secrets.sh"
+echo "Następny krok: Potwierdź skopiowanie klucza prywatnego"
