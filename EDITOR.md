@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================================
 # DEPLOY_GOLD.SH - System przywracania konfiguracji z Gold Image
-# Wersja: 1.1 (poprawiona - dodano check_sudo)
+# Wersja: 1.2 (poprawiona - uprawnienia pliku statusu)
 # Autor: AI Firma - System Operacyjny
 # Data: 2024-12-25
 # ============================================================================
@@ -9,6 +9,7 @@
 # 1. ZAWSZE tworzy pre-backup przed deployem
 # 2. TYLKO 3 pliki konfiguracyjne (początkowo)
 # 3. Wymaga sudo
+# 4. Plik statusu czytelny dla użytkownika ubuntu
 # ============================================================================
 
 set -e  # Zatrzymaj przy pierwszym błędzie
@@ -41,7 +42,7 @@ check_sudo() {
 }
 
 # ================= WALIDACJA =================
-check_sudo  # WYMAGANE UPRAWNIENIA ROOT - POPRAWKA 1.1
+check_sudo  # WYMAGANE UPRAWNIENIA ROOT
 log_message "INFO" "Rozpoczynam walidację..."
 
 # 1. Czy Gold Image istnieje?
@@ -127,12 +128,12 @@ STATUS_JSON=$(cat <<EOF
   "files_backed_up": $BACKUP_COUNT,
   "files_deployed": $DEPLOY_COUNT,
   "success": true,
-  "system": "Gold Image v1.1"
+  "system": "Gold Image v1.2"
 }
 EOF
 )
 
-# Zapis do pliku statusu
+# Zapis do pliku statusu z odpowiednimi uprawnieniami
 mkdir -p "$(dirname "$STATUS_FILE")"
 if [ -f "$STATUS_FILE" ]; then
     # Dodaj do istniejącego arraya
@@ -143,6 +144,10 @@ else
     echo '{"operations": []}' | jq --argjson new "$STATUS_JSON" '.operations += [$new]' > "$STATUS_FILE" 2>/dev/null || echo "$STATUS_JSON" > "$STATUS_FILE"
 fi
 
+# NAPRAWA UPRZWNIEŃ - PLIK CZYTELNY DLA UŻYTKOWNIKA UBUNTU
+chmod 644 "$STATUS_FILE" 2>/dev/null || true
+log_message "INFO" "Ustawiono uprawnienia pliku statusu: 644 (czytelny dla wszystkich)"
+
 # ================= PODSUMOWANIE =================
 echo ""
 echo "=========================================="
@@ -152,7 +157,7 @@ echo "• Data:            $(date)"
 echo "• Pre-backup:      $BACKUP_DIR"
 echo "• Pliki backupowane: $BACKUP_COUNT"
 echo "• Pliki deployed:    $DEPLOY_COUNT"
-echo "• Status:          ZAPISANO w $STATUS_FILE"
+echo "• Status:          ZAPISANO w $STATUS_FILE (uprawnienia: 644)"
 echo ""
 echo "WAŻNE: Zapisano pre-backup w:"
 echo "       $BACKUP_DIR"
