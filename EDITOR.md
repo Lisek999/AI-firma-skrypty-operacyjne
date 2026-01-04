@@ -1,105 +1,196 @@
 #!/bin/bash
-# secure_vault_generate_keys_final.sh - Generowanie nowej pary kluczy
-# Wersja: 1.2 | Data: 2024-12-29
-# Bez pytań, bez potwierdzeń - stary klucz jest bezużyteczny
+# backup_secrets.sh - Backup i szyfrowanie plików wrażliwych Secure Vault
+# Wersja: 1.0 | Data: 2024-12-29
+# Szyfrowanie asymetryczne RSA 4096-bit
 
 set -e
 
-echo "=== 🔐 GENEROWANIE NOWEJ PARY KLUCZY RSA 4096-BIT ==="
-echo "Stary klucz publiczny jest bezużyteczny bez klucza prywatnego"
-echo "Data: $(date)"
-echo ""
-
 # =================== KONFIGURACJA ===================
-KEYS_DIR="/home/ubuntu/.secure_vault"
-PUBLIC_KEY="$KEYS_DIR/backup_public.pem"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKUP_ROOT="/home/ubuntu/ai_firma_backups"
+SECURE_VAULT_DIR="$BACKUP_ROOT/secure_vault"
+BACKUPS_DIR="$SECURE_VAULT_DIR/backups"
+PUBLIC_KEY="/home/ubuntu/.secure_vault/backup_public.pem"
+STATUS_FILE="/var/log/backup_status.json"
+LOG_FILE="$SECURE_VAULT_DIR/backup_secrets.log"
+
+# Lista plików do backupu (można rozszerzyć)
+SOURCE_FILES=(
+    "/etc/nginx/.htpasswd_dashboard"
+    "/opt/ai_firma_dashboard/.env"  # Może nie istnieć
+)
+
+# =================== FUNKCJE POMOCNICZE ===================
+log_message() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
+update_status() {
+    local status_data="$1"
+    local temp_file="/tmp/backup_status_$$.json"
+    
+    if [ -f "$STATUS_FILE" ]; then
+        # Aktualizuj istniejący plik
+        jq --argjson new "$status_data" '.secure_vault = $new' "$STATUS_FILE" > "$temp_file" 2>/dev/null
+    else
+        # Utwórz nowy plik
+        echo "{\"secure_vault\": $status_data}" > "$temp_file"
+    fi
+    
+    # Zapisz z zachowaniem uprawnień
+    sudo cp "$temp_file" "$STATUS_FILE" 2>/dev/null || cp "$temp_file" "$STATUS_FILE"
+    sudo chmod 644 "$STATUS_FILE" 2>/dev/null || chmod 644 "$STATUS_FILE"
+    rm -f "$temp_file"
+}
 
 # =================== WALIDACJA ===================
-echo "1. 🧪 PRZYGOTOWANIE..."
-if [ ! -d "$KEYS_DIR" ]; then
-    echo "   ❌ BŁĄD: Brak katalogu .secure_vault"
-    echo "   Uruchom najpierw secure_vault_setup.sh"
+log_message "=== 🛡️ URUCHOMIENIE BACKUP SECURE VAULT ==="
+
+# Sprawdź klucz publiczny
+if [ ! -f "$PUBLIC_KEY" ]; then
+    log_message "❌ BŁĄD: Brak klucza publicznego: $PUBLIC_KEY"
     exit 1
 fi
 
-echo "   Usuwam stary klucz publiczny (bezużyteczny)..."
-rm -f "$PUBLIC_KEY" 2>/dev/null || true
-
-# =================== GENEROWANIE ===================
-echo -e "\n2. 🔧 GENEROWANIE KLUCZA PRYWATNEGO..."
-echo "   To może zająć 30-60 sekund..."
-echo "   Rozpoczynam: $(date)"
-
-START_TIME=$(date +%s)
-PRIVATE_KEY_CONTENT=$(openssl genpkey \
-    -algorithm RSA \
-    -pkeyopt rsa_keygen_bits:4096 \
-    -pkeyopt rsa_keygen_pubexp:65537 2>/dev/null)
-
-END_TIME=$(date +%s)
-DURATION=$((END_TIME - START_TIME))
-
-if [ -z "$PRIVATE_KEY_CONTENT" ]; then
-    echo "   ❌ BŁĄD: Nie udało się wygenerować klucza prywatnego"
+# Sprawdź katalog backupów
+if [ ! -d "$BACKUPS_DIR" ]; then
+    log_message "❌ BŁĄD: Brak katalogu backupów: $BACKUPS_DIR"
     exit 1
 fi
 
-echo "   ✅ Klucz prywatny wygenerowany pomyślnie"
-echo "   Czas generowania: ${DURATION} sekund"
+# =================== PRZYGOTOWANIE ===================
+TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+BACKUP_NAME="secrets_${TIMESTAMP}"
+TEMP_DIR="/tmp/secure_vault_backup_$$"
+TEMP_ARCHIVE="$TEMP_DIR/${BACKUP_NAME}.tar.gz"
+TEMP_ENCRYPTED="$TEMP_DIR/${BACKUP_NAME}.tar.gz.enc"
+FINAL_FILE="$BACKUPS_DIR/${BACKUP_NAME}.tar.gz.enc"
 
-# =================== ZAPIS KLUCZA PUBLICZNEGO ===================
-echo -e "\n3. 📤 ZAPISYWANIE KLUCZA PUBLICZNEGO..."
-echo "$PRIVATE_KEY_CONTENT" | openssl pkey -pubout -out "$PUBLIC_KEY" 2>/dev/null
+mkdir -p "$TEMP_DIR"
+log_message "📦 Przygotowanie backupu: $BACKUP_NAME"
 
-if [ ! -s "$PUBLIC_KEY" ]; then
-    echo "   ❌ BŁĄD: Nie udało się zapisać klucza publicznego"
+# =================== ZBIERANIE PLIKÓW ===================
+log_message "🔍 Zbieranie plików źródłowych..."
+
+EXISTING_FILES=()
+MISSING_FILES=()
+
+for file in "${SOURCE_FILES[@]}"; do
+    if [ -f "$file" ] && [ -r "$file" ]; then
+        EXISTING_FILES+=("$file")
+        log_message "   ✅ $file (dostępny)"
+    else
+        MISSING_FILES+=("$file")
+        log_message "   ⚠️  $file (brak lub brak dostępu)"
+    fi
+done
+
+if [ ${#EXISTING_FILES[@]} -eq 0 ]; then
+    log_message "❌ BŁĄD: Brak plików do backupu!"
+    rm -rf "$TEMP_DIR"
     exit 1
 fi
 
-chmod 600 "$PUBLIC_KEY"
-chown ubuntu:ubuntu "$PUBLIC_KEY"
+# =================== TWORZENIE ARCHIWUM ===================
+log_message "📁 Tworzenie archiwum..."
 
-echo "   ✅ Klucz publiczny zapisany: $PUBLIC_KEY"
-echo "   Uprawnienia: $(stat -c %A "$PUBLIC_KEY")"
+# Utwórz manifest plików
+MANIFEST_FILE="$TEMP_DIR/manifest.txt"
+{
+    echo "Secure Vault Backup - $(date)"
+    echo "Timestamp: $TIMESTAMP"
+    echo "Files included:"
+    printf '%s\n' "${EXISTING_FILES[@]}"
+    echo ""
+    echo "Files missing:"
+    printf '%s\n' "${MISSING_FILES[@]}"
+} > "$MANIFEST_FILE"
 
-# =================== WYŚWIETLENIE KLUCZA PRYWATNEGO ===================
-echo -e "\n4. 🚨 ==========================================================="
-echo "   🔥🔥🔥 KLUCZ PRYWATNY - SKOPIUJ CAŁOŚĆ PONIŻEJ 🔥🔥🔥"
-echo "   ==========================================================="
-echo ""
-echo "$PRIVATE_KEY_CONTENT"
-echo ""
-echo "   ==========================================================="
-echo "   ✅ KONIEC KLUCZA PRYWATNEGO"
-echo "   ==========================================================="
+# Dodaj manifest do archiwum
+tar czf "$TEMP_ARCHIVE" -C / "${EXISTING_FILES[@]}" -C "$TEMP_DIR" "manifest.txt" 2>/dev/null
 
-# =================== INSTRUKCJE ===================
-echo -e "\n5. 📋 INSTRUKCJE KOPIOWANIA W TERMINUSIE:"
-cat << 'EOF'
+if [ ! -s "$TEMP_ARCHIVE" ]; then
+    log_message "❌ BŁĄD: Nie udało się utworzyć archiwum"
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
 
-📥 **JAK SKOPIOWAĆ:**
-1. DOTKNIJ i PRZYTRZYMAJ gdziekolwiek w kluczu powyżej
-2. Wybierz "SELECT ALL" (Zaznacz wszystko)
-3. Wybierz "COPY" (Kopiuj)
-4. Wklej do bezpiecznego miejsca
+ARCHIVE_SIZE=$(stat -c %s "$TEMP_ARCHIVE")
+log_message "   ✅ Archiwum utworzone: $ARCHIVE_SIZE bajtów"
 
-💾 **ZAPISZ W 2 MIEJSCACH:**
-• Menedżer haseł (Bitwarden/1Password)
-• Notatnik na telefonie
-• Wydruk w sejfie
+# =================== SZYFROWANIE ===================
+log_message "🔐 Szyfrowanie kluczem publicznym..."
 
-⚠️  **BEZ TEGO KLUCZA BACKUPY SĄ BEZUŻYTECZNE!**
+# Szyfruj za pomocą klucza publicznego
+if openssl pkeyutl -encrypt -pubin -inkey "$PUBLIC_KEY" -in "$TEMP_ARCHIVE" -out "$TEMP_ENCRYPTED" 2>/dev/null; then
+    ENCRYPTED_SIZE=$(stat -c %s "$TEMP_ENCRYPTED")
+    log_message "   ✅ Zaszyfrowano: $ENCRYPTED_SIZE bajtów"
+else
+    log_message "❌ BŁĄD: Nie udało się zaszyfrować archiwum"
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
+
+# =================== ZAPIS BACKUPU ===================
+log_message "💾 Zapis backupu..."
+
+cp "$TEMP_ENCRYPTED" "$FINAL_FILE"
+chmod 600 "$FINAL_FILE"
+chown ubuntu:ubuntu "$FINAL_FILE"
+
+# Oblicz hash dla weryfikacji
+FILE_HASH=$(sha256sum "$FINAL_FILE" | awk '{print $1}')
+log_message "   ✅ Backup zapisany: $FINAL_FILE"
+log_message "   🔑 Hash SHA-256: $FILE_HASH"
+
+# =================== AKTUALIZACJA STATUSU ===================
+log_message "📝 Aktualizacja statusu..."
+
+STATUS_JSON=$(cat << EOF
+{
+    "timestamp": "$(date -Iseconds)",
+    "backup_name": "$BACKUP_NAME",
+    "file": "$(basename "$FINAL_FILE")",
+    "size_bytes": $ENCRYPTED_SIZE,
+    "hash_sha256": "$FILE_HASH",
+    "files_included": [$(printf '"%s",' "${EXISTING_FILES[@]}" | sed 's/,$//')],
+    "files_missing": [$(printf '"%s",' "${MISSING_FILES[@]}" | sed 's/,$//')],
+    "status": "success"
+}
 EOF
+)
 
-# =================== TEST ===================
-echo -e "\n6. 🧪 TEST SYGNALIZACYJNY..."
-echo "test" | timeout 2 openssl pkeyutl -encrypt -pubin -inkey "$PUBLIC_KEY" 2>&1 >/dev/null && echo "   ✅ Klucz publiczny działa" || echo "   ⚠️  Test pominięty"
+update_status "$STATUS_JSON"
+log_message "   ✅ Status zaktualizowany"
+
+# =================== ROTACJA STARYCH BACKUPÓW ===================
+log_message "🗑️  Sprawdzanie rotacji backupów (>30 dni)..."
+
+FIND_CMD="find \"$BACKUPS_DIR\" -name \"secrets_*.tar.gz.enc\" -mtime +30"
+OLD_FILES=$(eval "$FIND_CMD")
+
+if [ -n "$OLD_FILES" ]; then
+    COUNT=$(echo "$OLD_FILES" | wc -l)
+    log_message "   🔄 Usuwanie $COUNT starych backupów..."
+    echo "$OLD_FILES" | xargs rm -f
+    log_message "   ✅ Rotacja wykonana"
+else
+    log_message "   ✅ Brak starych backupów do usunięcia"
+fi
+
+# =================== SPRZĄTANIE ===================
+rm -rf "$TEMP_DIR"
+log_message "🧹 Posprzątano pliki tymczasowe"
 
 # =================== PODSUMOWANIE ===================
-echo -e "\n7. 📊 PODSUMOWANIE:"
-echo "   Klucz publiczny: $PUBLIC_KEY"
-echo "   Fingerprint: $(openssl rsa -pubin -in "$PUBLIC_KEY" -outform DER 2>/dev/null | openssl md5 -c 2>/dev/null | awk '{print $2}')"
-echo "   Czas generowania: ${DURATION}s"
+BACKUP_COUNT=$(find "$BACKUPS_DIR" -name "secrets_*.tar.gz.enc" | wc -l)
+TOTAL_SIZE=$(find "$BACKUPS_DIR" -name "secrets_*.tar.gz.enc" -exec stat -c %s {} \; | awk '{sum+=$1} END {print sum}')
 
-echo -e "\n=== ✅ GENEROWANIE ZAKOŃCZONE ==="
-echo "Następny krok: Potwierdź skopiowanie klucza prywatnego"
+log_message "=== ✅ BACKUP ZAKOŃCZONY POMYŚLNIE ==="
+log_message "📊 Statystyki Secure Vault:"
+log_message "   • Liczba backupów: $BACKUP_COUNT"
+log_message "   • Łączny rozmiar: $TOTAL_SIZE bajtów"
+log_message "   • Najnowszy backup: $(basename "$FINAL_FILE")"
+log_message "   • Hash weryfikacyjny: $FILE_HASH"
+
+echo "✅ Backup Secure Vault wykonany: $FINAL_FILE"
