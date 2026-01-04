@@ -1,154 +1,86 @@
+```bash
 #!/bin/bash
-# configure_secure_vault_cron.sh - Konfiguracja cron dla Secure Vault
-# Wersja: 1.0 | Data: 2024-12-29
+# Skrypt: update_disaster_plan_main.sh
+# Cel: Dopisanie rozdziału "Secure Vault" do DISASTER_RECOVERY_PLAN.md
+# Autor: Wojtek (AI) | Data: 2024-12-29 | Protokół: DA-CZ-W
 
 set -e
 
-echo "=== 🔧 KONFIGURACJA CRON DLA SECURE VAULT ==="
-echo "Data: $(date)"
-echo ""
+LOG_FILE="/var/log/update_disaster_plan.log"
+BACKUP_FILE="/opt/ai_firma_dashboard/DISASTER_RECOVERY_PLAN.md.backup_$(date +%Y%m%d_%H%M%S)"
+TARGET_FILE="/opt/ai_firma_dashboard/DISASTER_RECOVERY_PLAN.md"
 
-# =================== KONFIGURACJA ===================
-CRON_ENTRY="# Secure Vault - backup tajemnic (3:30 codziennie)"
-CRON_COMMAND="30 3 * * * /home/ubuntu/ai_firma_backups/secure_vault/backup_secrets.sh >> /home/ubuntu/ai_firma_backups/secure_vault/backup_secrets_cron.log 2>&1"
-BACKUP_SCRIPT="/home/ubuntu/ai_firma_backups/secure_vault/backup_secrets.sh"
-CRON_LOG="/home/ubuntu/ai_firma_backups/secure_vault/backup_secrets_cron.log"
+echo "=== Rozpoczynam aktualizację planu odzyskiwania (Secure Vault) ===" | tee -a "$LOG_FILE"
+echo "Czas: $(date)" | tee -a "$LOG_FILE"
 
-# =================== WALIDACJA ===================
-echo "1. 🧪 WALIDACJA PRZED KONFIGURACJĄ..."
-echo "   Sprawdzam skrypt backup: $BACKUP_SCRIPT"
-if [ ! -f "$BACKUP_SCRIPT" ]; then
-    echo "   ❌ BŁĄD: Brak skryptu backup!"
+# 1. Tworzenie kopii zapasowej pliku
+if [ -f "$TARGET_FILE" ]; then
+    echo "1. Tworzę kopię zapasową pliku: $BACKUP_FILE" | tee -a "$LOG_FILE"
+    cp "$TARGET_FILE" "$BACKUP_FILE"
+    echo "   Kopia utworzona pomyślnie." | tee -a "$LOG_FILE"
+else
+    echo "ERROR: Plik docelowy $TARGET_FILE nie istnieje!" | tee -a "$LOG_FILE"
     exit 1
 fi
 
-if [ ! -x "$BACKUP_SCRIPT" ]; then
-    echo "   ⚠️  Skrypt nie jest wykonywalny, naprawiam..."
-    chmod +x "$BACKUP_SCRIPT"
-fi
+# 2. Dopisanie nowego rozdziału
+echo "2. Dopisuję rozdział 'Secure Vault - Warstwa 3'..." | tee -a "$LOG_FILE"
 
-echo "   ✅ Skrypt backup jest gotowy"
+cat >> "$TARGET_FILE" << 'EOF'
 
-# =================== KONFIGURACJA CRON ===================
-echo -e "\n2. ⏰ KONFIGURACJA CRON..."
-echo "   Obecny cron:"
-sudo -u ubuntu crontab -l | grep -i "backup" | head -5 || echo "   (brak wpisów backup)"
+## Secure Vault - Warstwa 3: Ochrona kluczy i haseł
 
-echo -e "\n   Dodaję nowy wpis:"
-echo "   $CRON_ENTRY"
-echo "   $CRON_COMMAND"
+### Cel
+Zaszyfrowany backup wrażliwych danych z odzyskaniem TYLKO przez CEO.
 
-# Usuń stare wpisy dla backup_secrets.sh i dodaj nowy
-(sudo -u ubuntu crontab -l 2>/dev/null | grep -v "backup_secrets.sh"; echo "$CRON_ENTRY"; echo "$CRON_COMMAND") | sudo -u ubuntu crontab -
+### Architektura
+- Klucz publiczny: `/home/ubuntu/.secure_vault/backup_public.pem`
+- Klucz prywatny: OFFLINE u CEO (NIGDY na serwerze)
+- Backupy: `/home/ubuntu/ai_firma_backups/secure_vault/backups/secrets_*.tar.gz.enc`
+- Automatyzacja: Codziennie 3:30
 
-echo "   ✅ Cron skonfigurowany"
+### Procedura odzyskiwania
+1. **Pobierz backup** z serwera lub z kopii CEO
+2. **Odszyfruj** (na komputerze CEO):
+   ```bash
+   openssl pkeyutl -decrypt -inkey private.pem -in backup.enc -out backup.tar.gz
+```
 
-# =================== TWORZENIE PLIKU LOGÓW ===================
-echo -e "\n3. 📝 PRZYGOTOWANIE LOGÓW..."
-if [ ! -f "$CRON_LOG" ]; then
-    echo "   Tworzę plik logów: $CRON_LOG"
-    touch "$CRON_LOG"
-    chmod 600 "$CRON_LOG"
-    chown ubuntu:ubuntu "$CRON_LOG"
-else
-    echo "   Plik logów już istnieje"
-    chmod 600 "$CRON_LOG" 2>/dev/null || true
-fi
+1. Rozpakuj: tar xzf backup.tar.gz
+2. Przywróć pliki na nowy serwer
 
-echo "   Uprawnienia logów: $(stat -c %A "$CRON_LOG")"
+Krytyczne informacje
 
-# =================== TEST CRON ===================
-echo -e "\n4. 🧪 TEST KONFIGURACJI..."
-echo "   Testuję czy skrypt uruchomi się z cron (symulacja)..."
-cd /home/ubuntu/ai_firma_backups/secure_vault/
+· Fingerprint klucza: 63:69:60:8b:36:33:b7:24:6b:d4:81:1f:db:8d:9c:ae
+· Bez klucza prywatnego = utrata danych
+· Testuj odszyfrowanie PRZED awarią
 
-# Test szybkiego wykonania
-echo "   Rozpoczynam test: $(date)"
-TEST_OUTPUT=$(./backup_secrets.sh 2>&1 | tail -5)
-echo "   Zakończono test: $(date)"
-
-if echo "$TEST_OUTPUT" | grep -q "BACKUP ZAKOŃCZONY POMYŚLNIE"; then
-    echo "   ✅ Test wykonania zakończony sukcesem"
-else
-    echo "   ⚠️  Test wykonany, ale bez końcowego komunikatu"
-fi
-
-# =================== AKTUALIZACJA STATUSU ===================
-echo -e "\n5. 📊 AKTUALIZACJA STATUSU SYSTEMU..."
-STATUS_FILE="/var/log/backup_status.json"
-
-if [ -f "$STATUS_FILE" ]; then
-    echo "   Aktualizuję backup_status.json..."
-    
-    # Tworzymy JSON z informacją o cron
-    CRON_JSON=$(cat << EOF
-{
-  "secure_vault_cron": {
-    "configured": true,
-    "time": "3:30 daily",
-    "configured_at": "$(date -Iseconds)",
-    "log_file": "$CRON_LOG",
-    "script": "$BACKUP_SCRIPT"
-  }
-}
-EOF
-    )
-    
-    # Aktualizujemy plik statusu
-    if command -v jq >/dev/null 2>&1; then
-        echo "$CRON_JSON" | jq '.' > /tmp/cron_status.json
-        sudo jq --argfile cron /tmp/cron_status.json '. + $cron' "$STATUS_FILE" > /tmp/updated_status.json 2>/dev/null
-        if [ $? -eq 0 ]; then
-            sudo cp /tmp/updated_status.json "$STATUS_FILE"
-            sudo chmod 644 "$STATUS_FILE"
-            echo "   ✅ Status zaktualizowany (z użyciem jq)"
-        else
-            # Alternatywna metoda
-            sudo cp "$STATUS_FILE" "${STATUS_FILE}.backup"
-            echo "$CRON_JSON" | sudo tee -a "$STATUS_FILE" > /dev/null
-            echo "   ✅ Status zaktualizowany (metoda alternatywna)"
-        fi
-        rm -f /tmp/cron_status.json /tmp/updated_status.json
-    else
-        echo "   ⚠️  jq nie jest dostępne, pomijam aktualizację statusu"
-    fi
-else
-    echo "   ℹ️  Plik statusu nie istnieje, tworzę..."
-    echo '{"secure_vault_cron": {"configured": true, "time": "3:30 daily"}}' | sudo tee "$STATUS_FILE" > /dev/null
-    sudo chmod 644 "$STATUS_FILE"
-fi
-
-# =================== PODSUMOWANIE ===================
-echo -e "\n6. 📋 PODSUMOWANIE KONFIGURACJI:"
-echo "   -----------------------------------------"
-echo "   ✅ Cron skonfigurowany: 30 3 * * *"
-echo "   ✅ Skrypt: $BACKUP_SCRIPT"
-echo "   ✅ Logi: $CRON_LOG"
-echo "   ✅ Status: /var/log/backup_status.json"
-echo "   -----------------------------------------"
-
-echo -e "\n7. ⏰ HARMONOGRAM BACKUPÓW AI FIRMA:"
-cat << 'EOF'
-
-⏰ HARMONOGRAM BACKUPÓW AI FIRMA:
-─────────────────────────────────
-03:00 - Backup dashboardu
-03:15 - Backup skryptów  
-03:30 - Secure Vault (tajemnice) ✅
-04:00 - Backup tygodniowy (niedziela)
-
-📅 Codziennie: 3:00, 3:15, 3:30
-📅 Tygodniowo: Niedziela 4:00
-
-📁 Logi Secure Vault:
-• backup_secrets.log - logi ze skryptu
-• backup_secrets_cron.log - logi z cron
-
-🔧 Ręczne uruchomienie:
-cd /home/ubuntu/ai_firma_backups/secure_vault/
-./backup_secrets.sh
 EOF
 
-echo -e "\n=== ✅ KONFIGURACJA CRON ZAKOŃCZONA ==="
-echo "Secure Vault będzie uruchamiany automatycznie codziennie o 3:30"
-echo "Następny krok: Aktualizacja DISASTER_RECOVERY_PLAN.md"
+echo "   Rozdział dopisany pomyślnie." | tee -a "$LOG_FILE"
+
+3. Utworzenie kopii w katalogu dokumentacji
+
+DOCS_DIR="/home/ubuntu/ai_firma_dokumenty"
+echo "3. Tworzę kopię w katalogu dokumentacji: $DOCS_DIR/" | tee -a "$LOG_FILE"
+mkdir -p "$DOCS_DIR"
+cp "$TARGET_FILE" "$DOCS_DIR/DISASTER_RECOVERY_PLAN.md"
+echo "   Kopia utworzona pomyślnie." | tee -a "$LOG_FILE"
+
+4. Weryfikacja końcowa
+
+echo "4. Weryfikacja: sprawdzam czy plik został zaktualizowany..." | tee -a "$LOG_FILE"
+if tail -10 "$TARGET_FILE" | grep -q "Secure Vault - Warstwa 3"; then
+echo "   SUKCES: Nowy rozdział znajduje się w pliku." | tee -a "$LOG_FILE"
+echo "   Ścieżka do backupu: $BACKUP_FILE" | tee -a "$LOG_FILE"
+echo "   Ścieżka do kopii w dokumentacji: $DOCS_DIR/DISASTER_RECOVERY_PLAN.md" | tee -a "$LOG_FILE"
+else
+echo "   ERROR: Nie znaleziono nowego rozdziału w pliku." | tee -a "$LOG_FILE"
+echo "   Przywracam oryginalny plik z backupu..." | tee -a "$LOG_FILE"
+cp "$BACKUP_FILE" "$TARGET_FILE"
+exit 1
+fi
+
+echo "=== Aktualizacja zakończona pomyślnie ===" | tee -a "$LOG_FILE"
+
+```
