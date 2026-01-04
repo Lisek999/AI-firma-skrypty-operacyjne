@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================================
 # DEPLOY_GOLD.SH - System przywracania konfiguracji z Gold Image
-# Wersja: 1.0
+# Wersja: 1.1 (poprawiona - dodano check_sudo)
 # Autor: AI Firma - System Operacyjny
 # Data: 2024-12-25
 # ============================================================================
@@ -41,6 +41,7 @@ check_sudo() {
 }
 
 # ================= WALIDACJA =================
+check_sudo  # WYMAGANE UPRAWNIENIA ROOT - POPRAWKA 1.1
 log_message "INFO" "Rozpoczynam walidację..."
 
 # 1. Czy Gold Image istnieje?
@@ -126,7 +127,7 @@ STATUS_JSON=$(cat <<EOF
   "files_backed_up": $BACKUP_COUNT,
   "files_deployed": $DEPLOY_COUNT,
   "success": true,
-  "system": "Gold Image v1.0"
+  "system": "Gold Image v1.1"
 }
 EOF
 )
