@@ -1,196 +1,154 @@
 #!/bin/bash
-# backup_secrets.sh - Backup i szyfrowanie plików wrażliwych Secure Vault
+# configure_secure_vault_cron.sh - Konfiguracja cron dla Secure Vault
 # Wersja: 1.0 | Data: 2024-12-29
-# Szyfrowanie asymetryczne RSA 4096-bit
 
 set -e
 
+echo "=== 🔧 KONFIGURACJA CRON DLA SECURE VAULT ==="
+echo "Data: $(date)"
+echo ""
+
 # =================== KONFIGURACJA ===================
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKUP_ROOT="/home/ubuntu/ai_firma_backups"
-SECURE_VAULT_DIR="$BACKUP_ROOT/secure_vault"
-BACKUPS_DIR="$SECURE_VAULT_DIR/backups"
-PUBLIC_KEY="/home/ubuntu/.secure_vault/backup_public.pem"
-STATUS_FILE="/var/log/backup_status.json"
-LOG_FILE="$SECURE_VAULT_DIR/backup_secrets.log"
-
-# Lista plików do backupu (można rozszerzyć)
-SOURCE_FILES=(
-    "/etc/nginx/.htpasswd_dashboard"
-    "/opt/ai_firma_dashboard/.env"  # Może nie istnieć
-)
-
-# =================== FUNKCJE POMOCNICZE ===================
-log_message() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
-}
-
-update_status() {
-    local status_data="$1"
-    local temp_file="/tmp/backup_status_$$.json"
-    
-    if [ -f "$STATUS_FILE" ]; then
-        # Aktualizuj istniejący plik
-        jq --argjson new "$status_data" '.secure_vault = $new' "$STATUS_FILE" > "$temp_file" 2>/dev/null
-    else
-        # Utwórz nowy plik
-        echo "{\"secure_vault\": $status_data}" > "$temp_file"
-    fi
-    
-    # Zapisz z zachowaniem uprawnień
-    sudo cp "$temp_file" "$STATUS_FILE" 2>/dev/null || cp "$temp_file" "$STATUS_FILE"
-    sudo chmod 644 "$STATUS_FILE" 2>/dev/null || chmod 644 "$STATUS_FILE"
-    rm -f "$temp_file"
-}
+CRON_ENTRY="# Secure Vault - backup tajemnic (3:30 codziennie)"
+CRON_COMMAND="30 3 * * * /home/ubuntu/ai_firma_backups/secure_vault/backup_secrets.sh >> /home/ubuntu/ai_firma_backups/secure_vault/backup_secrets_cron.log 2>&1"
+BACKUP_SCRIPT="/home/ubuntu/ai_firma_backups/secure_vault/backup_secrets.sh"
+CRON_LOG="/home/ubuntu/ai_firma_backups/secure_vault/backup_secrets_cron.log"
 
 # =================== WALIDACJA ===================
-log_message "=== 🛡️ URUCHOMIENIE BACKUP SECURE VAULT ==="
-
-# Sprawdź klucz publiczny
-if [ ! -f "$PUBLIC_KEY" ]; then
-    log_message "❌ BŁĄD: Brak klucza publicznego: $PUBLIC_KEY"
+echo "1. 🧪 WALIDACJA PRZED KONFIGURACJĄ..."
+echo "   Sprawdzam skrypt backup: $BACKUP_SCRIPT"
+if [ ! -f "$BACKUP_SCRIPT" ]; then
+    echo "   ❌ BŁĄD: Brak skryptu backup!"
     exit 1
 fi
 
-# Sprawdź katalog backupów
-if [ ! -d "$BACKUPS_DIR" ]; then
-    log_message "❌ BŁĄD: Brak katalogu backupów: $BACKUPS_DIR"
-    exit 1
+if [ ! -x "$BACKUP_SCRIPT" ]; then
+    echo "   ⚠️  Skrypt nie jest wykonywalny, naprawiam..."
+    chmod +x "$BACKUP_SCRIPT"
 fi
 
-# =================== PRZYGOTOWANIE ===================
-TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
-BACKUP_NAME="secrets_${TIMESTAMP}"
-TEMP_DIR="/tmp/secure_vault_backup_$$"
-TEMP_ARCHIVE="$TEMP_DIR/${BACKUP_NAME}.tar.gz"
-TEMP_ENCRYPTED="$TEMP_DIR/${BACKUP_NAME}.tar.gz.enc"
-FINAL_FILE="$BACKUPS_DIR/${BACKUP_NAME}.tar.gz.enc"
+echo "   ✅ Skrypt backup jest gotowy"
 
-mkdir -p "$TEMP_DIR"
-log_message "📦 Przygotowanie backupu: $BACKUP_NAME"
+# =================== KONFIGURACJA CRON ===================
+echo -e "\n2. ⏰ KONFIGURACJA CRON..."
+echo "   Obecny cron:"
+sudo -u ubuntu crontab -l | grep -i "backup" | head -5 || echo "   (brak wpisów backup)"
 
-# =================== ZBIERANIE PLIKÓW ===================
-log_message "🔍 Zbieranie plików źródłowych..."
+echo -e "\n   Dodaję nowy wpis:"
+echo "   $CRON_ENTRY"
+echo "   $CRON_COMMAND"
 
-EXISTING_FILES=()
-MISSING_FILES=()
+# Usuń stare wpisy dla backup_secrets.sh i dodaj nowy
+(sudo -u ubuntu crontab -l 2>/dev/null | grep -v "backup_secrets.sh"; echo "$CRON_ENTRY"; echo "$CRON_COMMAND") | sudo -u ubuntu crontab -
 
-for file in "${SOURCE_FILES[@]}"; do
-    if [ -f "$file" ] && [ -r "$file" ]; then
-        EXISTING_FILES+=("$file")
-        log_message "   ✅ $file (dostępny)"
-    else
-        MISSING_FILES+=("$file")
-        log_message "   ⚠️  $file (brak lub brak dostępu)"
-    fi
-done
+echo "   ✅ Cron skonfigurowany"
 
-if [ ${#EXISTING_FILES[@]} -eq 0 ]; then
-    log_message "❌ BŁĄD: Brak plików do backupu!"
-    rm -rf "$TEMP_DIR"
-    exit 1
-fi
-
-# =================== TWORZENIE ARCHIWUM ===================
-log_message "📁 Tworzenie archiwum..."
-
-# Utwórz manifest plików
-MANIFEST_FILE="$TEMP_DIR/manifest.txt"
-{
-    echo "Secure Vault Backup - $(date)"
-    echo "Timestamp: $TIMESTAMP"
-    echo "Files included:"
-    printf '%s\n' "${EXISTING_FILES[@]}"
-    echo ""
-    echo "Files missing:"
-    printf '%s\n' "${MISSING_FILES[@]}"
-} > "$MANIFEST_FILE"
-
-# Dodaj manifest do archiwum
-tar czf "$TEMP_ARCHIVE" -C / "${EXISTING_FILES[@]}" -C "$TEMP_DIR" "manifest.txt" 2>/dev/null
-
-if [ ! -s "$TEMP_ARCHIVE" ]; then
-    log_message "❌ BŁĄD: Nie udało się utworzyć archiwum"
-    rm -rf "$TEMP_DIR"
-    exit 1
-fi
-
-ARCHIVE_SIZE=$(stat -c %s "$TEMP_ARCHIVE")
-log_message "   ✅ Archiwum utworzone: $ARCHIVE_SIZE bajtów"
-
-# =================== SZYFROWANIE ===================
-log_message "🔐 Szyfrowanie kluczem publicznym..."
-
-# Szyfruj za pomocą klucza publicznego
-if openssl pkeyutl -encrypt -pubin -inkey "$PUBLIC_KEY" -in "$TEMP_ARCHIVE" -out "$TEMP_ENCRYPTED" 2>/dev/null; then
-    ENCRYPTED_SIZE=$(stat -c %s "$TEMP_ENCRYPTED")
-    log_message "   ✅ Zaszyfrowano: $ENCRYPTED_SIZE bajtów"
+# =================== TWORZENIE PLIKU LOGÓW ===================
+echo -e "\n3. 📝 PRZYGOTOWANIE LOGÓW..."
+if [ ! -f "$CRON_LOG" ]; then
+    echo "   Tworzę plik logów: $CRON_LOG"
+    touch "$CRON_LOG"
+    chmod 600 "$CRON_LOG"
+    chown ubuntu:ubuntu "$CRON_LOG"
 else
-    log_message "❌ BŁĄD: Nie udało się zaszyfrować archiwum"
-    rm -rf "$TEMP_DIR"
-    exit 1
+    echo "   Plik logów już istnieje"
+    chmod 600 "$CRON_LOG" 2>/dev/null || true
 fi
 
-# =================== ZAPIS BACKUPU ===================
-log_message "💾 Zapis backupu..."
+echo "   Uprawnienia logów: $(stat -c %A "$CRON_LOG")"
 
-cp "$TEMP_ENCRYPTED" "$FINAL_FILE"
-chmod 600 "$FINAL_FILE"
-chown ubuntu:ubuntu "$FINAL_FILE"
+# =================== TEST CRON ===================
+echo -e "\n4. 🧪 TEST KONFIGURACJI..."
+echo "   Testuję czy skrypt uruchomi się z cron (symulacja)..."
+cd /home/ubuntu/ai_firma_backups/secure_vault/
 
-# Oblicz hash dla weryfikacji
-FILE_HASH=$(sha256sum "$FINAL_FILE" | awk '{print $1}')
-log_message "   ✅ Backup zapisany: $FINAL_FILE"
-log_message "   🔑 Hash SHA-256: $FILE_HASH"
+# Test szybkiego wykonania
+echo "   Rozpoczynam test: $(date)"
+TEST_OUTPUT=$(./backup_secrets.sh 2>&1 | tail -5)
+echo "   Zakończono test: $(date)"
+
+if echo "$TEST_OUTPUT" | grep -q "BACKUP ZAKOŃCZONY POMYŚLNIE"; then
+    echo "   ✅ Test wykonania zakończony sukcesem"
+else
+    echo "   ⚠️  Test wykonany, ale bez końcowego komunikatu"
+fi
 
 # =================== AKTUALIZACJA STATUSU ===================
-log_message "📝 Aktualizacja statusu..."
+echo -e "\n5. 📊 AKTUALIZACJA STATUSU SYSTEMU..."
+STATUS_FILE="/var/log/backup_status.json"
 
-STATUS_JSON=$(cat << EOF
+if [ -f "$STATUS_FILE" ]; then
+    echo "   Aktualizuję backup_status.json..."
+    
+    # Tworzymy JSON z informacją o cron
+    CRON_JSON=$(cat << EOF
 {
-    "timestamp": "$(date -Iseconds)",
-    "backup_name": "$BACKUP_NAME",
-    "file": "$(basename "$FINAL_FILE")",
-    "size_bytes": $ENCRYPTED_SIZE,
-    "hash_sha256": "$FILE_HASH",
-    "files_included": [$(printf '"%s",' "${EXISTING_FILES[@]}" | sed 's/,$//')],
-    "files_missing": [$(printf '"%s",' "${MISSING_FILES[@]}" | sed 's/,$//')],
-    "status": "success"
+  "secure_vault_cron": {
+    "configured": true,
+    "time": "3:30 daily",
+    "configured_at": "$(date -Iseconds)",
+    "log_file": "$CRON_LOG",
+    "script": "$BACKUP_SCRIPT"
+  }
 }
 EOF
-)
-
-update_status "$STATUS_JSON"
-log_message "   ✅ Status zaktualizowany"
-
-# =================== ROTACJA STARYCH BACKUPÓW ===================
-log_message "🗑️  Sprawdzanie rotacji backupów (>30 dni)..."
-
-FIND_CMD="find \"$BACKUPS_DIR\" -name \"secrets_*.tar.gz.enc\" -mtime +30"
-OLD_FILES=$(eval "$FIND_CMD")
-
-if [ -n "$OLD_FILES" ]; then
-    COUNT=$(echo "$OLD_FILES" | wc -l)
-    log_message "   🔄 Usuwanie $COUNT starych backupów..."
-    echo "$OLD_FILES" | xargs rm -f
-    log_message "   ✅ Rotacja wykonana"
+    )
+    
+    # Aktualizujemy plik statusu
+    if command -v jq >/dev/null 2>&1; then
+        echo "$CRON_JSON" | jq '.' > /tmp/cron_status.json
+        sudo jq --argfile cron /tmp/cron_status.json '. + $cron' "$STATUS_FILE" > /tmp/updated_status.json 2>/dev/null
+        if [ $? -eq 0 ]; then
+            sudo cp /tmp/updated_status.json "$STATUS_FILE"
+            sudo chmod 644 "$STATUS_FILE"
+            echo "   ✅ Status zaktualizowany (z użyciem jq)"
+        else
+            # Alternatywna metoda
+            sudo cp "$STATUS_FILE" "${STATUS_FILE}.backup"
+            echo "$CRON_JSON" | sudo tee -a "$STATUS_FILE" > /dev/null
+            echo "   ✅ Status zaktualizowany (metoda alternatywna)"
+        fi
+        rm -f /tmp/cron_status.json /tmp/updated_status.json
+    else
+        echo "   ⚠️  jq nie jest dostępne, pomijam aktualizację statusu"
+    fi
 else
-    log_message "   ✅ Brak starych backupów do usunięcia"
+    echo "   ℹ️  Plik statusu nie istnieje, tworzę..."
+    echo '{"secure_vault_cron": {"configured": true, "time": "3:30 daily"}}' | sudo tee "$STATUS_FILE" > /dev/null
+    sudo chmod 644 "$STATUS_FILE"
 fi
 
-# =================== SPRZĄTANIE ===================
-rm -rf "$TEMP_DIR"
-log_message "🧹 Posprzątano pliki tymczasowe"
-
 # =================== PODSUMOWANIE ===================
-BACKUP_COUNT=$(find "$BACKUPS_DIR" -name "secrets_*.tar.gz.enc" | wc -l)
-TOTAL_SIZE=$(find "$BACKUPS_DIR" -name "secrets_*.tar.gz.enc" -exec stat -c %s {} \; | awk '{sum+=$1} END {print sum}')
+echo -e "\n6. 📋 PODSUMOWANIE KONFIGURACJI:"
+echo "   -----------------------------------------"
+echo "   ✅ Cron skonfigurowany: 30 3 * * *"
+echo "   ✅ Skrypt: $BACKUP_SCRIPT"
+echo "   ✅ Logi: $CRON_LOG"
+echo "   ✅ Status: /var/log/backup_status.json"
+echo "   -----------------------------------------"
 
-log_message "=== ✅ BACKUP ZAKOŃCZONY POMYŚLNIE ==="
-log_message "📊 Statystyki Secure Vault:"
-log_message "   • Liczba backupów: $BACKUP_COUNT"
-log_message "   • Łączny rozmiar: $TOTAL_SIZE bajtów"
-log_message "   • Najnowszy backup: $(basename "$FINAL_FILE")"
-log_message "   • Hash weryfikacyjny: $FILE_HASH"
+echo -e "\n7. ⏰ HARMONOGRAM BACKUPÓW AI FIRMA:"
+cat << 'EOF'
 
-echo "✅ Backup Secure Vault wykonany: $FINAL_FILE"
+⏰ HARMONOGRAM BACKUPÓW AI FIRMA:
+─────────────────────────────────
+03:00 - Backup dashboardu
+03:15 - Backup skryptów  
+03:30 - Secure Vault (tajemnice) ✅
+04:00 - Backup tygodniowy (niedziela)
+
+📅 Codziennie: 3:00, 3:15, 3:30
+📅 Tygodniowo: Niedziela 4:00
+
+📁 Logi Secure Vault:
+• backup_secrets.log - logi ze skryptu
+• backup_secrets_cron.log - logi z cron
+
+🔧 Ręczne uruchomienie:
+cd /home/ubuntu/ai_firma_backups/secure_vault/
+./backup_secrets.sh
+EOF
+
+echo -e "\n=== ✅ KONFIGURACJA CRON ZAKOŃCZONA ==="
+echo "Secure Vault będzie uruchamiany automatycznie codziennie o 3:30"
+echo "Następny krok: Aktualizacja DISASTER_RECOVERY_PLAN.md"
