@@ -1,25 +1,33 @@
 #!/bin/bash
-# SKRYPT 3: BEZPIECZNE UKRYCIE panelu Gold Image przez komentarz
+# SKRYPT 4: ZAMIANA panelu Gold Image na komunikat o przeniesieniu
 FILE="/opt/ai_firma_dashboard/static/index.html"
-BACKUP="${FILE}.before_comment_$(date +%Y%m%d_%H%M%S)"
+BACKUP="${FILE}.before_replace_$(date +%Y%m%d_%H%M%S)"
 
-echo "1. Tworzenie backupu: $BACKUP"
+echo "Tworzenie backupu..."
 cp "$FILE" "$BACKUP"
 
-echo "2. Dodawanie komentarza OTWIERAJĄCEGO przed panelem..."
-# Dodaj komentarz otwierający PRZED linią 86
-sed -i '86i\        <!-- PANEL GOLD IMAGE WYŁĄCZONY - PRZENIESIONY DO OSOBNEJ ZAKŁADKI -->' "$FILE"
-sed -i '87i\        <!--' "$FILE"
+echo "Zamiana panelu Gold Image na komunikat..."
+# Zamień CAŁY panel (linie 86-102) na nową treść
+sed -i '86,102c\
+        <!-- PANEL GOLD IMAGE PRZENIESIONY -->\
+        <div class="card">\
+            <h2>🔧 Zarządzanie Systemem</h2>\
+            <div style="padding: 20px; text-align: center;">\
+                <p style="color: #666; font-size: 16px;">\
+                    Funkcje Gold Image i Backup zostały przeniesione<br>\
+                    do dedykowanego panelu zarządzania.\
+                </p>\
+                <p style="margin-top: 15px;">\
+                    <a href="/backup_management" style="\
+                        background: #3498db;\
+                        color: white;\
+                        padding: 10px 20px;\
+                        border-radius: 6px;\
+                        text-decoration: none;\
+                        display: inline-block;\
+                    ">Przejdź do panelu Backup</a>\
+                </p>\
+            </div>\
+        </div>' "$FILE"
 
-echo "3. Dodawanie komentarza ZAMYKAJĄCEGO po panelu..."
-# Znajdź linię z </div> zamykającym panel (około linia 102)
-# Dodaj komentarz zamykający PO tej linii
-sed -i '103i\        -->' "$FILE"
-
-echo "4. Weryfikacja..."
-echo "   Podgląd linii 84-108:"
-sed -n '84,108p' "$FILE"
-
-echo "✓ Panel Gold Image został wyłączony (zakomentowany)."
-echo "✓ HTML pozostaje nienaruszony strukturalnie."
-echo "✓ Możesz łatwo przywrócić usuwając komentarze."
+echo "Zrobione. Panel został ZASTĄPIONY, nie usunięty."
