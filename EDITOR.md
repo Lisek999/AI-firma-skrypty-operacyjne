@@ -1,47 +1,47 @@
 #!/bin/bash
-# SKRYPT: Zamiana wyłączonego panelu Gold Image na kafelek Backup Management
+# SKRYPT: Naprawa funkcji initGoldPanel - usuwa błędy JavaScript
 FILE="/opt/ai_firma_dashboard/static/index.html"
-BACKUP="${FILE}.before_backup_tile_$(date +%Y%m%d_%H%M%S)"
+BACKUP="${FILE}.fix_js_$(date +%Y%m%d_%H%M%S)"
 
 echo "1. Tworzenie backupu..."
 cp "$FILE" "$BACKUP"
 
-echo "2. Znajdowanie i zamiana całego panelu Gold Image..."
+echo "2. Szukam funkcji initGoldPanel..."
+START_LINE=$(grep -n "function initGoldPanel()" "$FILE" | cut -d: -f1)
 
-# Usuń stare linie (86-102) i wstaw nowy kafelek
-sed -i '86,102c\
-        <!-- KAFELEK BACKUP MANAGEMENT (w miejsce starego Gold Image) -->\
-        <div class="card">\
-            <h2>💾 Zarządzanie Backupami</h2>\
-            <div style="padding: 20px; text-align: center;">\
-                <p style="color: #666; margin-bottom: 15px;">\
-                    Bezpieczne zarządzanie backupami i Gold Image\
-                    w dedykowanym, testowym środowisku.\
-                </p>\
-                <a href="/static/backup_management.html" style="\
-                    background: #9b59b6;\
-                    color: white;\
-                    padding: 12px 24px;\
-                    border-radius: 6px;\
-                    text-decoration: none;\
-                    display: inline-block;\
-                    font-weight: bold;\
-                    font-size: 16px;\
-                ">🔧 Otwórz panel Backup</a>\
-                <p style="font-size: 12px; color: #888; margin-top: 10px;">\
-                    ⚡ Testy w izolowanym środowisku /tmp/ | 📊 Pełne logowanie\
-                </p>\
-            </div>\
-        </div>' "$FILE"
+if [ -z "$START_LINE" ]; then
+    echo "❌ Nie znaleziono funkcji initGoldPanel()"
+    exit 1
+fi
 
-echo "3. Sprawdzenie zmian..."
-echo "   Szukam 'Zarządzanie Backupami':"
-grep -n "Zarządzanie Backupami" "$FILE"
+echo "3. Funkcja znaleziona w linii $START_LINE"
 
-echo "4. Restart Gunicorn..."
+echo "4. Zastępuję starą funkcję nową..."
+# Usuwamy 20 linii od START_LINE (wystarczająco na całą funkcję)
+sed -i "${START_LINE},+20d" "$FILE"
+
+# Wstawiamy nową, bezpieczną funkcję
+sed -i "${START_LINE}i\\
+        function initGoldPanel() {\\
+            // Funkcja dezaktywowana - panel Gold Image przeniesiony\\
+            // do /static/backup_management.html\\
+            console.log('Gold Image: panel disabled, use backup management page');\\
+        }" "$FILE"
+
+echo "5. Usuwam wywołanie initGoldPanel() z DOMContentLoaded..."
+sed -i "s/initGoldPanel();//g" "$FILE"
+
+echo "6. Sprawdzam czy są jeszcze odwołania do nieistniejących elementów..."
+if grep -q "getElementById.*goldStatus\|getElementById.*authSection\|getElementById.*createGoldBtn" "$FILE"; then
+    echo "   ⚠️  Są jeszcze odwołania - mogą powodować błędy"
+    grep -n "getElementById.*goldStatus\|getElementById.*authSection\|getElementById.*createGoldBtn" "$FILE"
+else
+    echo "   ✓ Brak niebezpiecznych odwołań"
+fi
+
+echo "7. Restart Gunicorn..."
 sudo pkill gunicorn
 cd /opt/ai_firma_dashboard && sudo -u www-data /opt/ai_firma_dashboard/venv/bin/gunicorn --workers 2 --bind 127.0.0.1:5000 app:app --daemon
-sleep 2
+sleep 3
 
-echo "✓ Stary panel Gold Image zastąpiony kafelkiem Backup Management."
-echo "✓ Sprawdź główny dashboard."
+echo "✓ Naprawa JavaScript zakończona. Sprawdź dashboard."
