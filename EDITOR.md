@@ -1,44 +1,114 @@
 #!/bin/bash
 # ============================================================================
-# SKRYPT: aktualizacja_app_py.sh
-# CEL: Aktualizacja app.py o system statusu i nowy routing
-# UWAGA: To jest INCREMENTALNA zmiana - dodajemy do istniejącego pliku
+# SKRYPT: naprawa_app_py.sh
+# CEL: Naprawa błędów wcięć w app.py po nieudanej aktualizacji
 # ============================================================================
 
-echo "=== AKTUALIZUJĘ APP.PY ==="
+echo "=== NAPRAWA APP.PY ==="
 
 cd /opt/ai_firma_dashboard || exit 1
 
-# Tworzymy backup przed zmianą
-BACKUP_NAME="app.py.backup_before_system_status_$(date +%Y%m%d_%H%M%S)"
-cp app.py "$BACKUP_NAME"
-echo "✅ Utworzono backup: $BACKUP_NAME"
+# 1. Przywracamy ORYGINALNY stan funkcji get_service_status
+echo "1. Przywracam funkcję get_service_status..."
 
-# Dodajemy funkcję get_system_status() po istniejącej get_service_status()
-# Szukamy linii z definicją get_service_status
-LINE_NUMBER=$(grep -n "def get_service_status" app.py | head -1 | cut -d: -f1)
+# Tworzymy poprawną wersję funkcji
+cat > /tmp/correct_get_service_status.py << 'EOF'
+def get_service_status(service_name):
+    try:
+        result = subprocess.run(['systemctl', 'is-active', service_name],
+                                capture_output=True, text=True, timeout=2)
+        return result.stdout.strip() == 'active'
+    except:
+        return False
+EOF
 
-if [ -z "$LINE_NUMBER" ]; then
+# Znajdujemy i zastępujemy uszkodzoną funkcję
+# Usuwamy linie od def get_service_status do przed następną funkcją
+START_LINE=$(grep -n "def get_service_status" app.py | head -1 | cut -d: -f1)
+if [ -n "$START_LINE" ]; then
+    # Szukamy gdzie kończy się funkcja (następna funkcja lub pusta linia)
+    TOTAL_LINES=$(wc -l < app.py)
+    for (( i=START_LINE+1; i<=TOTAL_LINES; i++ )); do
+        LINE_CONTENT=$(sed -n "${i}p" app.py)
+        if [[ "$LINE_CONTENT" =~ ^def\  ]] || [[ "$LINE_CONTENT" =~ ^@app\.route ]]; then
+            END_LINE=$((i-1))
+            break
+        fi
+        if [ $i -eq $TOTAL_LINES ]; then
+            END_LINE=$TOTAL_LINES
+        fi
+    done
+    
+    # Tworzymy naprawiony plik
+    head -n $((START_LINE-1)) app.py > /tmp/app_fixed.py
+    cat /tmp/correct_get_service_status.py >> /tmp/app_fixed.py
+    tail -n +$((END_LINE+1)) app.py >> /tmp/app_fixed.py
+    
+    mv /tmp/app_fixed.py app.py
+    echo "✅ Przywrócono funkcję get_service_status"
+else
     echo "❌ Nie znaleziono funkcji get_service_status"
     exit 1
 fi
 
-# Obliczamy gdzie wstawić nową funkcję (po get_service_status)
-INSERT_LINE=$((LINE_NUMBER + 7))  # get_service_status ma około 7 linii
+# 2. Sprawdzamy czy kontekstowy procesor jest w dobrym miejscu
+echo "2. Sprawdzam kontekstowy procesor..."
+CONTEXT_LINE=$(grep -n "@app.context_processor" app.py)
+if [ -z "$CONTEXT_LINE" ]; then
+    echo "Dodaję kontekstowy procesor w odpowiednim miejscu..."
+    
+    # Szukamy miejsca po definicji app
+    APP_LINE=$(grep -n "app = Flask" app.py | head -1 | cut -d: -f1)
+    INSERT_LINE=$((APP_LINE + 2))
+    
+    # Poprawny kontekstowy procesor
+    cat > /tmp/correct_context_processor.py << 'EOF'
+# Kontekstowy procesor - status systemu dostępny we wszystkich szablonach
+@app.context_processor
+def inject_system_status():
+    """Wstrzykuje status systemu do wszystkich szablonów"""
+    status_data = get_system_status()
+    return {
+        'status': status_data['status'],
+        'status_message': status_data['message']
+    }
+EOF
+    
+    sed -i "${INSERT_LINE}r /tmp/correct_context_processor.py" app.py
+    echo "✅ Dodano kontekstowy procesor"
+fi
 
-# Tworzymy tymczasowy plik z nową funkcją
-cat > /tmp/system_status_function.py << 'EOF'
+# 3. Sprawdzamy czy funkcja get_system_status istnieje i jest poprawna
+echo "3. Sprawdzam funkcję get_system_status..."
+if ! grep -q "def get_system_status" app.py; then
+    echo "Dodaję funkcję get_system_status..."
+    
+    # Szukamy gdzie wstawić (po get_service_status)
+    SERVICE_LINE=$(grep -n "def get_service_status" app.py | head -1 | cut -d: -f1)
+    SERVICE_END=0
+    TOTAL_LINES=$(wc -l < app.py)
+    
+    # Szukamy końca funkcji get_service_status
+    for (( i=SERVICE_LINE+1; i<=TOTAL_LINES; i++ )); do
+        LINE_CONTENT=$(sed -n "${i}p" app.py)
+        if [[ "$LINE_CONTENT" =~ ^[[:space:]]*$ ]]; then
+            SERVICE_END=$i
+            break
+        fi
+    done
+    
+    if [ $SERVICE_END -eq 0 ]; then
+        SERVICE_END=$((SERVICE_LINE + 10))
+    fi
+    
+    # Poprawna funkcja get_system_status
+    cat > /tmp/correct_get_system_status.py << 'EOF'
 def get_system_status():
     """Zwraca status systemu dla szablonów HTML"""
     try:
         # Sprawdzamy kluczowe usługi
         nginx_ok = get_service_status('nginx')
         supervisor_ok = get_service_status('supervisor')
-        
-        # Można dodać więcej checków:
-        # - Czy backup_status.json istnieje i ma ostatni status OK?
-        # - Czy dysk nie jest pełny?
-        # - Czy jest połączenie z internetem?
         
         if nginx_ok and supervisor_ok:
             return {
@@ -73,110 +143,36 @@ def get_system_status():
             'details': {'error': str(e)}
         }
 EOF
-
-# Wstawiamy nową funkcję do app.py
-sed -i "${INSERT_LINE}r /tmp/system_status_function.py" app.py
-echo "✅ Dodano funkcję get_system_status()"
-
-# Dodajemy kontekstowy procesor - szukamy miejsca po definicji app
-APP_LINE=$(grep -n "app = Flask" app.py | head -1 | cut -d: -f1)
-CONTEXT_LINE=$((APP_LINE + 2))
-
-# Tworzymy kontekstowy procesor
-cat > /tmp/context_processor.py << 'EOF'
-# Kontekstowy procesor - status systemu dostępny we wszystkich szablonach
-@app.context_processor
-def inject_system_status():
-    """Wstrzykuje status systemu do wszystkich szablonów"""
-    status_data = get_system_status()
-    return {
-        'status': status_data['status'],
-        'status_message': status_data['message']
-    }
-EOF
-
-# Wstawiamy kontekstowy procesor
-sed -i "${CONTEXT_LINE}r /tmp/context_processor.py" app.py
-echo "✅ Dodano kontekstowy procesor"
-
-# Aktualizujemy istniejącą route '/' aby używała szablonu
-echo ""
-echo "=== AKTUALIZUJĘ ROUTING =="
-
-# Tworzymy nową wersję funkcji głównej
-cat > /tmp/main_route.py << 'EOF'
-from flask import render_template
-
-@app.route('/')
-def index():
-    """Główna strona z kafelkami"""
-    return render_template('index.html')
-
-@app.route('/archive')
-def archive():
-    """Strona archiwum/backupów"""
-    return render_template('archive.html')
-
-@app.route('/terminal')
-def terminal():
-    """Terminal serwera"""
-    return render_template('terminal.html')
-
-@app.route('/explorer')
-def explorer():
-    """Eksplorator plików"""
-    return render_template('explorer.html')
-
-@app.route('/config')
-def config():
-    """Konfiguracja systemu"""
-    return render_template('config.html')
-
-@app.route('/pulse')
-def pulse():
-    """Puls systemu - monitoring"""
-    return render_template('pulse.html')
-
-@app.route('/tools')
-def tools():
-    """Narzędzia systemowe"""
-    return render_template('tools.html')
-EOF
-
-# Znajdujemy i zastępujemy starą route '/'
-START_LINE=$(grep -n "@app.route('/')" app.py | head -1 | cut -d: -f1)
-if [ -n "$START_LINE" ]; then
-    END_LINE=$((START_LINE + 10))  # Szukamy końca funkcji
-    # Tworzymy nowy plik bez starej route
-    head -n $((START_LINE - 1)) app.py > /tmp/app_part1.py
-    cat /tmp/main_route.py >> /tmp/app_part1.py
-    tail -n +$((END_LINE + 1)) app.py >> /tmp/app_part1.py
     
-    # Zastępujemy oryginalny plik
-    mv /tmp/app_part1.py app.py
-    echo "✅ Zaktualizowano routing główny"
-else
-    echo "⚠️ Nie znaleziono istniejącej route '/', dodaję nowe"
-    echo "" >> app.py
-    cat /tmp/main_route.py >> app.py
-    echo "✅ Dodano nowy routing"
+    # Wstawiamy po funkcji get_service_status
+    sed -i "${SERVICE_END}r /tmp/correct_get_system_status.py" app.py
+    echo "✅ Dodano funkcję get_system_status"
 fi
 
-# Weryfikacja
+# 4. Weryfikacja
 echo ""
-echo "=== WERYFIKACJA ZMIAN ==="
-echo "Nowe funkcje:"
-grep -n "def get_system_status\|def inject_system_status" app.py
+echo "=== WERYFIKACJA NAPRAWY ==="
+python3 -m py_compile app.py && echo "✅ Składnia Python OK" || echo "❌ Błąd składni"
+
 echo ""
-echo "Nowy routing:"
-grep -n "@app.route" app.py
+echo "=== STRUKTURA APP.PY ==="
+grep -n "^def \|^@app\." app.py
+
 echo ""
-echo "=== IMPORT RENDER_TEMPLATE ==="
-grep -n "from flask import" app.py | head -5
+echo "=== TEST IMPORTU ==="
+python3 -c "
+import sys
+sys.path.insert(0, '.')
+try:
+    import app
+    print('✅ Import app.py udany')
+    print('Funkcje:')
+    print('  - get_service_status:', hasattr(app, 'get_service_status'))
+    print('  - get_system_status:', hasattr(app, 'get_system_status'))
+    print('  - inject_system_status:', hasattr(app, 'inject_system_status'))
+except Exception as e:
+    print('❌ Błąd importu:', e)
+"
+
 echo ""
-echo "✅ AKTUALIZACJA APP.PY ZAKOŃCZONA"
-echo ""
-echo "=== NASTĘPNE KROKI ==="
-echo "1. Sprawdź czy app.py się uruchamia: python3 -c 'import app'"
-echo "2. Zrestartuj usługę: sudo systemctl restart ai-firma-dashboard"
-echo "3. Stwórz szablony index.html i archive.html"
+echo "✅ NAPRAWA ZAKOŃCZONA"
