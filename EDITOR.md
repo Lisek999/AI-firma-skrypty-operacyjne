@@ -1,205 +1,182 @@
 #!/bin/bash
 # ============================================================================
-# SKRYPT: tworzenie_systemu_szablonow.sh
-# CEL: Stworzenie podstawowego systemu szablonów Jinja2 dla Dashboard AI Firma
-# DATA: $(date)
-# AUTOR: Wojtek (AI Programista)
+# SKRYPT: aktualizacja_app_py.sh
+# CEL: Aktualizacja app.py o system statusu i nowy routing
+# UWAGA: To jest INCREMENTALNA zmiana - dodajemy do istniejącego pliku
 # ============================================================================
 
-echo "=== ROZPOCZYNAM TWORZENIE SYSTEMU SZABLONÓW ==="
+echo "=== AKTUALIZUJĘ APP.PY ==="
 
-# 1. Tworzymy katalog templates
-mkdir -p /opt/ai_firma_dashboard/templates
-echo "✅ Utworzono katalog /opt/ai_firma_dashboard/templates/"
+cd /opt/ai_firma_dashboard || exit 1
 
-# 2. Tworzymy podstawowy szablon layout.html
-cat > /opt/ai_firma_dashboard/templates/layout.html << 'EOF'
-<!DOCTYPE html>
-<html lang="pl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}AI Firma Dashboard{% endblock %}</title>
-    <style>
-        /* ===== PODSTAWOWY CIEMNY MOTYW ===== */
-        :root {
-            --bg-primary: #1a1d23;
-            --bg-secondary: #2d333b;
-            --text-primary: #e6edf3;
-            --text-secondary: #adbac7;
-            --accent: #539bf5;
-            --success: #57ab5a;
-            --error: #e5534b;
-            --border: #444c56;
-        }
-        
-        * {
-            box-sizing: border-box;
-        }
-        
-        body {
-            margin: 0;
-            padding: 0;
-            background-color: var(--bg-primary);
-            color: var(--text-primary);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            line-height: 1.5;
-            min-height: 100vh;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        /* ===== NAGŁÓWEK ===== */
-        .header {
-            background: var(--bg-secondary);
-            border-bottom: 1px solid var(--border);
-            padding: 1rem 0;
-            margin-bottom: 2rem;
-        }
-        
-        .header-content {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 1rem;
-        }
-        
-        .logo {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: var(--accent);
-        }
-        
-        .user-info {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-        }
-        
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background-color: var(--success);
-        }
-        
-        .status-dot.error {
-            background-color: var(--error);
-        }
-        
-        .timestamp {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            font-family: monospace;
-        }
-        
-        /* ===== STOPKA ===== */
-        .footer {
-            margin-top: 3rem;
-            padding: 1.5rem 0;
-            border-top: 1px solid var(--border);
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            text-align: center;
-        }
-    </style>
-    {% block extra_css %}{% endblock %}
-    
-    {% block extra_head %}{% endblock %}
-</head>
-<body>
-    <header class="header">
-        <div class="container header-content">
-            <div class="logo">AI FIRMA DASHBOARD</div>
-            <div class="status-indicator">
-                <div class="status-dot {{ 'error' if status == 'error' else '' }}"></div>
-                <span id="status-text">{{ status_message }}</span>
-            </div>
-            <div class="user-info">Tomasz Lis</div>
-        </div>
-    </header>
+# Tworzymy backup przed zmianą
+BACKUP_NAME="app.py.backup_before_system_status_$(date +%Y%m%d_%H%M%S)"
+cp app.py "$BACKUP_NAME"
+echo "✅ Utworzono backup: $BACKUP_NAME"
 
-    <div class="container">
-        <!-- TIMESTAMP NA STRONIE GŁÓWNEJ TYLKO -->
-        {% if request.path == '/' %}
-        <div class="timestamp" id="live-timestamp">
-            Ładowanie czasu...
-        </div>
-        {% endif %}
+# Dodajemy funkcję get_system_status() po istniejącej get_service_status()
+# Szukamy linii z definicją get_service_status
+LINE_NUMBER=$(grep -n "def get_service_status" app.py | head -1 | cut -d: -f1)
+
+if [ -z "$LINE_NUMBER" ]; then
+    echo "❌ Nie znaleziono funkcji get_service_status"
+    exit 1
+fi
+
+# Obliczamy gdzie wstawić nową funkcję (po get_service_status)
+INSERT_LINE=$((LINE_NUMBER + 7))  # get_service_status ma około 7 linii
+
+# Tworzymy tymczasowy plik z nową funkcją
+cat > /tmp/system_status_function.py << 'EOF'
+def get_system_status():
+    """Zwraca status systemu dla szablonów HTML"""
+    try:
+        # Sprawdzamy kluczowe usługi
+        nginx_ok = get_service_status('nginx')
+        supervisor_ok = get_service_status('supervisor')
         
-        {% block content %}
-        <!-- TREŚĆ STRONY BĘDZIE TU -->
-        {% endblock %}
-    </div>
-
-    <footer class="footer">
-        <div class="container">
-            © 2024 AI Firma Dashboard | Wersja 1.0 | 
-            <span id="footer-status">Status: <span class="status-indicator">
-                <div class="status-dot {{ 'error' if status == 'error' else '' }}"></div>
-                {{ status }}
-            </span></span>
-        </div>
-    </footer>
-
-    {% block scripts %}
-    <!-- SKRYPT DO ODSWIEŻANIA CZASU NA STRONIE GŁÓWNEJ -->
-    {% if request.path == '/' %}
-    <script>
-        function updateTimestamp() {
-            const now = new Date();
-            const options = { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false
-            };
-            document.getElementById('live-timestamp').textContent = 
-                now.toLocaleDateString('pl-PL', options);
+        # Można dodać więcej checków:
+        # - Czy backup_status.json istnieje i ma ostatni status OK?
+        # - Czy dysk nie jest pełny?
+        # - Czy jest połączenie z internetem?
+        
+        if nginx_ok and supervisor_ok:
+            return {
+                'status': 'ok',
+                'message': 'Systemy sprawne',
+                'details': {
+                    'nginx': 'działa',
+                    'supervisor': 'działa',
+                    'timestamp': time.time()
+                }
+            }
+        else:
+            error_msg = []
+            if not nginx_ok:
+                error_msg.append("nginx")
+            if not supervisor_ok:
+                error_msg.append("supervisor")
+            
+            return {
+                'status': 'error',
+                'message': f'Awaria: {", ".join(error_msg)}',
+                'details': {
+                    'nginx': 'awaria' if not nginx_ok else 'działa',
+                    'supervisor': 'awaria' if not supervisor_ok else 'działa',
+                    'timestamp': time.time()
+                }
+            }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'message': f'Błąd sprawdzania statusu: {str(e)}',
+            'details': {'error': str(e)}
         }
-        
-        // Odświeżaj co sekundę
-        updateTimestamp();
-        setInterval(updateTimestamp, 1000);
-    </script>
-    {% endif %}
-    {% endblock %}
-    
-    {% block extra_scripts %}{% endblock %}
-</body>
-</html>
 EOF
 
-echo "✅ Utworzono szablon /opt/ai_firma_dashboard/templates/layout.html"
+# Wstawiamy nową funkcję do app.py
+sed -i "${INSERT_LINE}r /tmp/system_status_function.py" app.py
+echo "✅ Dodano funkcję get_system_status()"
 
-# 3. Weryfikacja
-echo ""
-echo "=== WERYFIKACJA ==="
-ls -la /opt/ai_firma_dashboard/templates/
-echo ""
-echo "=== PODGLĄD STRUKTURY SZABLONU ==="
-head -30 /opt/ai_firma_dashboard/templates/layout.html
-echo "..."
-tail -10 /opt/ai_firma_dashboard/templates/layout.html
+# Dodajemy kontekstowy procesor - szukamy miejsca po definicji app
+APP_LINE=$(grep -n "app = Flask" app.py | head -1 | cut -d: -f1)
+CONTEXT_LINE=$((APP_LINE + 2))
 
+# Tworzymy kontekstowy procesor
+cat > /tmp/context_processor.py << 'EOF'
+# Kontekstowy procesor - status systemu dostępny we wszystkich szablonach
+@app.context_processor
+def inject_system_status():
+    """Wstrzykuje status systemu do wszystkich szablonów"""
+    status_data = get_system_status()
+    return {
+        'status': status_data['status'],
+        'status_message': status_data['message']
+    }
+EOF
+
+# Wstawiamy kontekstowy procesor
+sed -i "${CONTEXT_LINE}r /tmp/context_processor.py" app.py
+echo "✅ Dodano kontekstowy procesor"
+
+# Aktualizujemy istniejącą route '/' aby używała szablonu
 echo ""
-echo "=== INSTRUKCJE DALSZE ==="
-echo "1. Szablon layout.html jest gotowy"
-echo "2. Następny krok: zaktualizować app.py o kontekst statusu"
-echo "3. Potem: stworzyć index.html z kafelkami"
+echo "=== AKTUALIZUJĘ ROUTING =="
+
+# Tworzymy nową wersję funkcji głównej
+cat > /tmp/main_route.py << 'EOF'
+from flask import render_template
+
+@app.route('/')
+def index():
+    """Główna strona z kafelkami"""
+    return render_template('index.html')
+
+@app.route('/archive')
+def archive():
+    """Strona archiwum/backupów"""
+    return render_template('archive.html')
+
+@app.route('/terminal')
+def terminal():
+    """Terminal serwera"""
+    return render_template('terminal.html')
+
+@app.route('/explorer')
+def explorer():
+    """Eksplorator plików"""
+    return render_template('explorer.html')
+
+@app.route('/config')
+def config():
+    """Konfiguracja systemu"""
+    return render_template('config.html')
+
+@app.route('/pulse')
+def pulse():
+    """Puls systemu - monitoring"""
+    return render_template('pulse.html')
+
+@app.route('/tools')
+def tools():
+    """Narzędzia systemowe"""
+    return render_template('tools.html')
+EOF
+
+# Znajdujemy i zastępujemy starą route '/'
+START_LINE=$(grep -n "@app.route('/')" app.py | head -1 | cut -d: -f1)
+if [ -n "$START_LINE" ]; then
+    END_LINE=$((START_LINE + 10))  # Szukamy końca funkcji
+    # Tworzymy nowy plik bez starej route
+    head -n $((START_LINE - 1)) app.py > /tmp/app_part1.py
+    cat /tmp/main_route.py >> /tmp/app_part1.py
+    tail -n +$((END_LINE + 1)) app.py >> /tmp/app_part1.py
+    
+    # Zastępujemy oryginalny plik
+    mv /tmp/app_part1.py app.py
+    echo "✅ Zaktualizowano routing główny"
+else
+    echo "⚠️ Nie znaleziono istniejącej route '/', dodaję nowe"
+    echo "" >> app.py
+    cat /tmp/main_route.py >> app.py
+    echo "✅ Dodano nowy routing"
+fi
+
+# Weryfikacja
 echo ""
-echo "✅ SYSTEM SZABLONÓW ZAINICJOWANY"
+echo "=== WERYFIKACJA ZMIAN ==="
+echo "Nowe funkcje:"
+grep -n "def get_system_status\|def inject_system_status" app.py
+echo ""
+echo "Nowy routing:"
+grep -n "@app.route" app.py
+echo ""
+echo "=== IMPORT RENDER_TEMPLATE ==="
+grep -n "from flask import" app.py | head -5
+echo ""
+echo "✅ AKTUALIZACJA APP.PY ZAKOŃCZONA"
+echo ""
+echo "=== NASTĘPNE KROKI ==="
+echo "1. Sprawdź czy app.py się uruchamia: python3 -c 'import app'"
+echo "2. Zrestartuj usługę: sudo systemctl restart ai-firma-dashboard"
+echo "3. Stwórz szablony index.html i archive.html"
