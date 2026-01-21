@@ -1,86 +1,48 @@
 #!/bin/bash
 # ============================================================================
-# SKRYPT: naprawa_create_gold_image.sh
-# CEL: Minimalna naprawa - dodanie cd do REPO_ROOT w skrypcie Gold Image
+# SKRYPT: naprawa_uprawnien_gold_image.sh
+# CEL: Naprawa uprawnień - dodanie czytania dla www-data
 # DATA: $(date)
 # ============================================================================
 
 SCRIPT_PATH="/home/ubuntu/skrypty/create_gold_image.sh"
-BACKUP_PATH="/home/ubuntu/skrypty/create_gold_image.sh.backup_$(date +%Y%m%d_%H%M%S)"
 
-echo "=== Rozpoczynam naprawę skryptu create_gold_image.sh ==="
+echo "=== Rozpoczynam naprawę uprawnień skryptu ==="
 
-# 1. Tworzenie backupu
-echo "[1] Tworzenie backupu: $BACKUP_PATH"
-cp "$SCRIPT_PATH" "$BACKUP_PATH" || {
-    echo "ERROR: Nie można utworzyć backupu!"
-    exit 1
-}
+# 1. Diagnoza obecnych uprawnień
+echo "[1] Obecne uprawnienia:"
+ls -la "$SCRIPT_PATH"
 
-# 2. Diagnoza obecnego stanu - gdzie jest wywołanie validate_git_status?
-echo "[2] Analiza obecnej struktury skryptu..."
-echo "    Miejsce wywołania validate_git_status:"
-grep -n "validate_git_status" "$SCRIPT_PATH"
+CURRENT_PERMS=$(stat -c "%a" "$SCRIPT_PATH")
+echo "    Uprawnienia numerycznie: $CURRENT_PERMS"
 
-echo "    Sekcja główna (linie po funkcjach pomocniczych):"
-grep -n "log_info.*Rozpoczynanie" "$SCRIPT_PATH"
+# 2. Analiza problemu
+echo "[2] Analiza:"
+echo "    Obecnie: -rwx--x--x (właściciel: rwx, grupa: --x, inni: --x)"
+echo "    Problem: www-data (innym) brakuje 'r' (czytania) do interpretacji przez bash"
+echo "    Rozwiązanie: chmod o+r (dodaj czytanie dla innych)"
 
-# 3. Znajdź linię rozpoczęcia głównej sekcji
-START_LINE=$(grep -n "log_info.*Rozpoczynanie tworzenia Gold Image" "$SCRIPT_PATH" | cut -d: -f1)
+# 3. Wykonanie naprawy
+echo "[3] Wykonanie naprawy: chmod o+r $SCRIPT_PATH"
+chmod o+r "$SCRIPT_PATH"
 
-if [ -z "$START_LINE" ]; then
-    echo "ERROR: Nie znaleziono linii rozpoczęcia głównej sekcji!"
-    exit 1
-fi
+# 4. Weryfikacja zmian
+echo "[4] Nowe uprawnienia:"
+ls -la "$SCRIPT_PATH"
 
-echo "[3] Główna sekcja zaczyna się w linii: $START_LINE"
+NEW_PERMS=$(stat -c "%a" "$SCRIPT_PATH")
+echo "    Nowe uprawnienia numerycznie: $NEW_PERMS"
 
-# 4. Wstawienie 'cd "$REPO_ROOT"' bezpośrednio po rozpoczęciu głównej sekcji
-echo "[4] Wstawianie 'cd \"\$REPO_ROOT\"' w linii $((START_LINE + 1))..."
+# 5. Test uprawnień jako www-data (symulacja)
+echo "[5] Test uprawnień (symulacja):"
+sudo -u www-data test -r "$SCRIPT_PATH" && echo "    ✅ www-data MOŻE czytać plik" || echo "    ❌ www-data NIE MOŻE czytać pliku"
+sudo -u www-data test -x "$SCRIPT_PATH" && echo "    ✅ www-data MOŻE wykonać plik" || echo "    ❌ www-data NIE MOŻE wykonać pliku"
 
-# Tworzenie tymczasowego pliku z poprawką
-TEMP_FILE=$(mktemp)
-
-# Kopiowanie skryptu z dodaną komendą cd
-awk -v line="$START_LINE" '
-{
-    print $0
-    if (NR == line) {
-        print "    # Przejdź do katalogu repozytorium"
-        print "    cd \"$REPO_ROOT\" || {"
-        print "        log_error \"Nie można przejść do katalogu: $REPO_ROOT\""
-        print "        exit 1"
-        print "    }"
-        print "    log_info \"Pracuję w katalogu: $(pwd)\""
-    }
-}' "$SCRIPT_PATH" > "$TEMP_FILE"
-
-# 5. Zastąpienie oryginalnego pliku
-mv "$TEMP_FILE" "$SCRIPT_PATH"
-chmod +x "$SCRIPT_PATH"
-
-# 6. Weryfikacja zmian
-echo "[5] Weryfikacja zmian:"
-echo "    Zmienione linie wokół $START_LINE:"
-sed -n "$((START_LINE-2)),$((START_LINE+10))p" "$SCRIPT_PATH"
-
-# 7. Test parsowania (bez wykonania)
-echo "[6] Test parsowania składni:"
-if bash -n "$SCRIPT_PATH"; then
-    echo "    ✅ Składnia poprawna"
-else
-    echo "    ❌ Błąd składni!"
-    echo "    Przywracanie backupu..."
-    cp "$BACKUP_PATH" "$SCRIPT_PATH"
-    exit 1
-fi
-
-echo "[7] Gotowe! Skrypt został naprawiony."
+echo "[6] Gotowe! Uprawnienia naprawione."
 echo ""
 echo "=== Podsumowanie ==="
-echo "1. Backup: $BACKUP_PATH"
-echo "2. Dodano: 'cd \"\$REPO_ROOT\"' po linii $START_LINE"
-echo "3. Test składni: ✅"
+echo "Zmieniono: -rwx--x--x -> -rwx--xr-x"
+echo "Dodano: czytanie (r) dla innych (w tym www-data)"
 echo ""
 echo "Aby przetestować:"
 echo "curl -X POST http://127.0.0.1:5000/api/gold_image/manage"
