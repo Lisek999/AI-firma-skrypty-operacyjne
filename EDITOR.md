@@ -1,57 +1,46 @@
 #!/bin/bash
-# Naprawa crontab - zmiana z EDITOR.md na dedykowane skrypty backupu
-echo "=== Naprawa crontab - właściwe skrypty backupu ==="
+# Naprawa skryptu backupu - usunięcie interakcji dla cron
+BACKUP_SCRIPT="/home/ubuntu/skrypty/git_daily_dashboard_backup.sh"
 
-echo "[1] Obecny crontab (problematyczny):"
-crontab -l | head -10
+echo "=== Naprawa skryptu backupu dla cron ==="
 
-echo "[2] Tworzę poprawiony crontab..."
+echo "[1] Obecny problematyczny fragment (linie 35-45):"
+sed -n '35,45p' "$BACKUP_SCRIPT"
 
-# Tworzenie tymczasowego pliku z poprawionym crontab
-TEMP_CRON=$(mktemp)
+echo "[2] Tworzę kopię bezpieczeństwa..."
+cp "$BACKUP_SCRIPT" "$BACKUP_SCRIPT.backup_$(date +%Y%m%d_%H%M%S)"
 
-cat > "$TEMP_CRON" << 'EOF'
-# === AUTOMATYCZNE BACKUPY AI FIRMA ===
-# Backup dzienny - dashboard (3:00)
-0 3 * * * /usr/bin/bash /home/ubuntu/skrypty/git_daily_dashboard_backup.sh >> /var/log/dashboard_backup.log 2>&1
-# Backup dzienny - skrypty (3:15)
-15 3 * * * /usr/bin/bash /home/ubuntu/skrypty/git_daily_skrypty_backup.sh >> /var/log/skrypty_backup.log 2>&1
-# Backup tygodniowy - pełny (niedziela 4:00)
-0 4 * * 0 /usr/bin/bash /home/ubuntu/skrypty/git_weekly_full_backup.sh >> /var/log/weekly_backup.log 2>&1
-# Secure Vault - backup tajemnic (3:30 codziennie)
-30 3 * * * /home/ubuntu/ai_firma_backups/secure_vault/backup_secrets.sh >> /home/ubuntu/ai_firma_backups/secure_vault/backup_secrets_cron.log 2>&1
-EOF
+echo "[3] Usuwam interaktywny read i zastępuję automatycznym TAK..."
+# Usuń linie 38-43 i zastąp prostym kontynuowaniem
+sed -i '38,43d' "$BACKUP_SCRIPT"
+sed -i '37a\echo "✅  Kontynuowanie backupu (tryb automatyczny dla cron)..."' "$BACKUP_SCRIPT"
 
-echo "[3] Nowy crontab:"
-cat "$TEMP_CRON"
+echo "[4] Nowy fragment (linie 35-40):"
+sed -n '35,40p' "$BACKUP_SCRIPT"
 
-echo "[4] Zastępuję crontab..."
-crontab "$TEMP_CRON"
+echo "[5] Test uruchomienia (powinno działać bez pytania):"
+echo "   Uruchamiam: bash $BACKUP_SCRIPT"
+bash "$BACKUP_SCRIPT" 2>&1 | tail -10
 
-echo "[5] Weryfikacja:"
-crontab -l
-
-echo "[6] Test ręcznego uruchomienia backupu dashboardu (tworzy log):"
-echo "   Wykonuję: bash /home/ubuntu/skrypty/git_daily_dashboard_backup.sh"
-bash /home/ubuntu/skrypty/git_daily_dashboard_backup.sh 2>&1 | tail -5
-
-echo "[7] Sprawdzam czy log powstał:"
-sleep 2
+echo "[6] Sprawdzam czy log powstał:"
+sleep 3
 if [ -f "/var/log/dashboard_backup.log" ]; then
     echo "   ✅ Log utworzony!"
     ls -la /var/log/dashboard_backup.log
     echo "   Ostatnie 3 linie:"
     tail -3 /var/log/dashboard_backup.log
+    
+    echo "[7] Test endpointu (będzie pokazywał daty z logów):"
+    echo "   curl -s http://57.128.247.215:5000/api/backup/status | python3 -c \"import sys, json; print(json.load(sys.stdin)['message'])\""
 else
-    echo "   ❌ Log NIE utworzony"
+    echo "   ❌ Log NIE utworzony - skrypt może mieć inne problemy"
+    echo "   Sprawdzam błędy z ostatniego uruchomienia..."
+    bash "$BACKUP_SCRIPT" 2>&1 | grep -i "error\|fail\|błąd" | head -5
 fi
 
-# Czyszczenie
-rm -f "$TEMP_CRON"
-
-echo "[8] Endpoint backup_status() będzie teraz pokazywał daty z logów!"
-echo "    Restart gunicorn:"
-echo "    sudo pkill -f 'gunicorn.*app:app'"
-echo "    cd /opt/ai_firma_dashboard && sudo -u www-data /opt/ai_firma_dashboard/venv/bin/gunicorn --workers 2 --bind 0.0.0.0:5000 app:app --daemon"
+echo "[8] To samo dla innych skryptów backupu:"
+echo "   /home/ubuntu/skrypty/git_daily_skrypty_backup.sh"
+echo "   /home/ubuntu/skrypty/git_weekly_full_backup.sh"
+echo "   (wymagają tej samej naprawy)"
 
 echo "=== Gotowe ==="
