@@ -1,209 +1,84 @@
 #!/bin/bash
-# =============================================================================
-# SKRYPT: dodaj_bezpieczenstwo_api.sh
-# CEL: Dodanie mechanizmu autoryzacji X-API-Key do wszystkich endpointów backup
-# PRIORYTET: KRYTYCZNY - bez tego system jest niezabezpieczony
-# =============================================================================
+# Naprawa błędnego dodania dekoratorów @require_api_key
 
-set -e
-
-echo "🔒 ROZPOCZĘCIE: Dodawanie zabezpieczeń API..."
-
-# ----------------------------------------------------------------------------
-# KROK 1: Sprawdź obecne endpointy backup
-# ----------------------------------------------------------------------------
-echo "📋 Analizuję istniejące endpointy backup..."
-ENDPOINTS=$(grep -n "@app.route.*backup" /opt/ai_firma_dashboard/app.py)
-echo "Znalezione endpointy:"
-echo "$ENDPOINTS"
-
-# ----------------------------------------------------------------------------
-# KROK 2: Utwórz dekorator require_api_key
-# ----------------------------------------------------------------------------
-echo "🛡️ Tworzę dekorator require_api_key..."
-
-# Sprawdź gdzie dodać dekorator (najlepiej po importach)
-HEAD_LINES=$(head -40 /opt/ai_firma_dashboard/app.py | grep -n "app = Flask" | head -1 | cut -d: -f1)
+echo "🔧 Naprawiam błędne dekoratory..."
 
 sudo python3 -c "
-import sys
-
-# Odczytaj plik
 with open('/opt/ai_firma_dashboard/app.py', 'r') as f:
     lines = f.readlines()
 
-# Znajdź linię z 'app = Flask'
-for i, line in enumerate(lines):
-    if 'app = Flask(__name__)' in line:
-        insert_pos = i + 1
-        break
-else:
-    insert_pos = 20  # Fallback
-
-# Dodaj dekorator po deklaracji app
-decorator = '''
-# =============================================================================
-# BEZPIECZEŃSTWO API
-# =============================================================================
-API_KEYS = {
-    'dashboard': 'AI_FIRMA_SECURE_KEY_2024'  # TODO: Zmień na silny klucz!
-}
-
-def require_api_key(f):
-    \"\"\"Dekorator wymagający nagłówka X-API-Key\"\"\"
-    from flask import request, jsonify
-    from functools import wraps
+# Usuń błędne dekoratory w środku funkcji
+new_lines = []
+i = 0
+while i < len(lines):
+    line = lines[i]
     
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        api_key = request.headers.get('X-API-Key')
-        
-        if not api_key:
-            return jsonify({
-                'status': 'error',
-                'message': 'Brak nagłówka X-API-Key'
-            }), 401
-        
-        if api_key not in API_KEYS.values():
-            return jsonify({
-                'status': 'error', 
-                'message': 'Nieprawidłowy klucz API'
-            }), 403
-        
-        return f(*args, **kwargs)
+    # Jeśli linia zawiera @require_api_key i następna linia to '}), 202'
+    # to usuwamy @require_api_key (jest w złym miejscu)
+    if '@require_api_key' in line and i+1 < len(lines) and '}), 202' in lines[i+1]:
+        print(f'⚠️  Usuwam błędny dekorator w linii {i+1}')
+        i += 1  # Pomijamy tę linię
+        continue
     
-    return decorated_function
-'''
+    new_lines.append(line)
+    i += 1
 
-lines.insert(insert_pos, decorator)
-
-# Zapisz plik
+# Zapisz poprawiony plik
 with open('/opt/ai_firma_dashboard/app.py', 'w') as f:
-    f.writelines(lines)
+    f.writelines(new_lines)
 
-print('✅ Dodano dekorator require_api_key')
+print('✅ Usunięto błędne dekoratory')
 "
 
-# ----------------------------------------------------------------------------
-# KROK 3: Zabezpiecz istniejące endpointy backup
-# ----------------------------------------------------------------------------
-echo "🔐 Zabezpieczam endpointy backup..."
+# Teraz dodaj dekoratory we właściwych miejscach
+echo "🔄 Dodaję dekoratory we właściwych miejscach..."
+
+sudo python3 -c "
+with open('/opt/ai_firma_dashboard/app.py', 'r') as f:
+    lines = f.readlines()
 
 # Lista endpointów do zabezpieczenia
-ENDPOINT_LINES=$(grep -n "@app.route.*backup" /opt/ai_firma_dashboard/app.py | cut -d: -f1)
+endpoints = [
+    ('def backup_status():', 'GET'),
+    ('def backup_restore():', 'POST'), 
+    ('def backup_configure():', 'POST')
+]
 
-for line_num in $ENDPOINT_LINES; do
-    echo "Sprawdzam linię $line_num..."
+new_lines = []
+for i, line in enumerate(lines):
+    new_lines.append(line)
     
-    # Sprawdź czy już ma dekorator
-    sudo python3 -c "
-import sys
-line_num = int($line_num)
-
-with open('/opt/ai_firma_dashboard/app.py', 'r') as f:
-    lines = f.readlines()
-
-# Sprawdź 3 linie przed endpointem
-has_decorator = False
-for i in range(max(0, line_num-4), line_num):
-    if '@require_api_key' in lines[i]:
-        has_decorator = True
-        break
-
-if not has_decorator:
-    # Dodaj dekorator przed @app.route
-    lines.insert(line_num-1, '@require_api_key\\n')
-    
-    with open('/opt/ai_firma_dashboard/app.py', 'w') as f:
-        f.writelines(lines)
-    
-    print(f'✅ Zabezpieczono endpoint w linii {line_num}')
-else:
-    print(f'⚠️  Endpoint w linii {line_num} już zabezpieczony')
-"
-done
-
-# ----------------------------------------------------------------------------
-# KROK 4: Sprawdź i utwórz klucz API
-# ----------------------------------------------------------------------------
-echo "🔑 Konfiguruję klucz API..."
-
-# Sprawdź czy klucz istnieje w zmiennych środowiskowych
-if ! grep -q "API_KEY" /opt/ai_firma_dashboard/.env 2>/dev/null; then
-    echo "Generuję nowy klucz API..."
-    NEW_KEY=$(openssl rand -hex 32 2>/dev/null || echo "AI_FIRMA_SECURE_KEY_$(date +%s)")
-    
-    # Zapisz do .env
-    sudo tee -a /opt/ai_firma_dashboard/.env > /dev/null << EOF
-# Klucz API dla Dashboard
-API_KEY=$NEW_KEY
-EOF
-    
-    echo "✅ Wygenerowano nowy klucz API"
-    echo "🔑 Twój klucz API: $NEW_KEY"
-    echo "⚠️  Zapisz ten klucz! Będzie potrzebny do konfiguracji frontendu."
-else
-    echo "✅ Klucz API już istnieje w .env"
-fi
-
-# ----------------------------------------------------------------------------
-# KROK 5: Zaktualizuj klucz w kodzie
-# ----------------------------------------------------------------------------
-echo "🔄 Aktualizuję klucz w kodzie..."
-
-sudo python3 -c "
-import re
-
-with open('/opt/ai_firma_dashboard/app.py', 'r') as f:
-    content = f.read()
-
-# Odczytaj klucz z .env
-try:
-    with open('/opt/ai_firma_dashboard/.env', 'r') as f:
-        env_content = f.read()
-    import re
-    match = re.search(r'API_KEY=([^\\n]+)', env_content)
-    if match:
-        api_key = match.group(1).strip()
-    else:
-        api_key = 'AI_FIRMA_SECURE_KEY_2024'
-except:
-    api_key = 'AI_FIRMA_SECURE_KEY_2024'
-
-# Zaktualizuj słownik API_KEYS
-new_content = re.sub(
-    r\"API_KEYS = \\{.*?\\}\",
-    f\"API_KEYS = {{'dashboard': '{api_key}'}}\",
-    content,
-    flags=re.DOTALL
-)
+    # Sprawdź czy to początek funkcji backup
+    for func_def, method in endpoints:
+        if func_def in line:
+            print(f'Znaleziono {func_def} w linii {i+1}')
+            
+            # Sprawdź czy już ma dekorator (szukaj 3 linie wcześniej)
+            has_decorator = False
+            for j in range(max(0, i-3), i):
+                if '@require_api_key' in lines[j]:
+                    has_decorator = True
+                    break
+            
+            if not has_decorator:
+                # Dodaj dekorator przed definicją funkcji
+                new_lines.pop()  # Usuń ostatnio dodaną linię
+                new_lines.append('@require_api_key\\n')
+                new_lines.append(line)
+                print(f'✅ Dodano @require_api_key przed {func_def}')
 
 with open('/opt/ai_firma_dashboard/app.py', 'w') as f:
-    f.write(new_content)
-
-print(f'✅ Zaktualizowano API_KEYS z kluczem: {api_key[:10]}...')
+    f.writelines(new_lines)
 "
 
-# ----------------------------------------------------------------------------
-# KROK 6: Restart Dashboard
-# ----------------------------------------------------------------------------
+# Restart Dashboard
 echo "🔄 Restartuję Dashboard..."
 sudo pkill -f "gunicorn.*dashboard" 2>/dev/null || true
 sleep 2
 cd /opt/ai_firma_dashboard && sudo /opt/ai_firma_dashboard/venv/bin/python3 /opt/ai_firma_dashboard/venv/bin/gunicorn --workers 1 --bind 0.0.0.0:5000 app:app --daemon
 sleep 3
 
-# ----------------------------------------------------------------------------
-# KROK 7: Test zabezpieczeń
-# ----------------------------------------------------------------------------
-echo "🧪 Testuję zabezpieczenia..."
-echo "Test 1: Bez klucza API (powinien zwrócić 401):"
-curl -s -o /dev/null -w "%{http_code}" -X POST http://57.128.247.215:5000/api/backup/restore
-echo ""
-
-echo "Test 2: Z nieprawidłowym kluczem (powinien zwrócić 403):"
-curl -s -o /dev/null -w "%{http_code}" -X POST http://57.128.247.215:5000/api/backup/restore -H "X-API-Key: WRONG_KEY"
-echo ""
-
-echo "🎯 Zabezpieczenia API zostały dodane!"
-echo "📋 Następny krok: dodać endpoint /api/backup/trigger_manual"
+# Test
+echo "🧪 Testuję poprawiony endpoint..."
+curl -s -o /dev/null -w "Status: %{http_code}\n" -X POST http://57.128.247.215:5000/api/backup/restore -H "X-API-Key: WRONG_KEY"
+echo "Z nieprawidłowym kluczem powinno być 403"
