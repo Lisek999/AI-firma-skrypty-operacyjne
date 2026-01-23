@@ -1,6 +1,7 @@
 #!/bin/bash
-echo "=== TEST F - DEFINITYWNY TEST CACHE ==="
-echo "Data: $(date '+%Y-%m-%d %H:%M:%S')"
-echo "Unikalny identyfikator: $(uuidgen 2>/dev/null || echo "RAND_$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 10)")"
-echo "To musi być UNIKALNA zawartość"
-echo "=== KONIEC TESTU F ==="
+echo "=== TEST G - OSTATECZNE POTWIERDZENIE ==="
+echo "Data: $(date '+%Y-%m-%d %H:%M:%S.%N')"
+echo "UUID: $(uuidgen 2>/dev/null || echo "R$(head /dev/urandom | tr -dc 0-9 | head -c 10)")"
+echo "To jest CAŁKOWICIE INNY skrypt niż TEST F"
+echo "Jeśli to widzisz, cache GitHub jest POKONANY"
+echo "=== SUKCES ==="
