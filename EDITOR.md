@@ -1,8 +1,6 @@
 #!/bin/bash
-echo "=== TEST E - DEFINITYWNE POTWIERDZENIE ==="
-echo "Data wykonania: $(date '+%Y-%m-%d %H:%M:%S')"
-echo "System getscript: DZIAŁA"
-echo "GitHub cache: POKONANY poprzez branch master"
-echo "Timestamp unikalny: $(date +%s%N)"
-echo "Status: SYSTEM W PEŁNI OPERACYJNY"
-echo "=== KONIEC TESTU E - SUKCES ==="
+echo "=== TEST F - DEFINITYWNY TEST CACHE ==="
+echo "Data: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "Unikalny identyfikator: $(uuidgen 2>/dev/null || echo "RAND_$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 10)")"
+echo "To musi być UNIKALNA zawartość"
+echo "=== KONIEC TESTU F ==="
