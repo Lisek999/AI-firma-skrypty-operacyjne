@@ -1,6 +1,6 @@
 #!/bin/bash
-echo "=== TEST B - SKRYPT DIAGNOSTYCZNY ==="
-echo "Data testu B: $(date '+%Y-%m-%d %H:%M:%S')"
-echo "To jest TEST B - Drugi skrypt testowy - INNY niż A"
-echo "Suma kontrolna tego skryptu: TEST_B_$(date +%s)"
-echo "=== KONIEC TESTU B ==="
+echo "=== TEST C - POTWIERDZENIE NAPRAWY ==="
+echo "System getscript działa poprawnie!"
+echo "Cache GitHub pokonany!"
+echo "Data: $(date)"
+echo "Timestamp: $(date +%s)"
